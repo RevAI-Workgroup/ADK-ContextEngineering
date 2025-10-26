@@ -23,11 +23,25 @@ Example Use Case:
 baseline = SystemWithoutRAG()
 treatment = SystemWithRAG()
 test = PairedComparisonTest(baseline, treatment)
-results = test.run_test(test_cases, metrics)
-# Shows: "RAG improved ROUGE by +15% on identical test set"
+
+# Define metric extractors and directions
+metrics = {
+    'rouge1_f1': lambda r: r['rouge1_f1'],
+    'latency_ms': lambda r: r['latency_ms'],
+    'hallucination_rate': lambda r: r['hallucination_rate']
+}
+directions = {
+    'rouge1_f1': 'higher',          # Higher accuracy is better
+    'latency_ms': 'lower',          # Lower latency is better
+    'hallucination_rate': 'lower'   # Lower hallucination is better
+}
+
+results = test.run_test(test_cases, metrics, metric_directions=directions)
+test.print_summary(results)
+# Shows: "RAG improved ROUGE by +15%, reduced latency by -20% on identical test set"
 """
 
-from typing import List, Dict, Any, Callable
+from typing import List, Dict, Any, Callable, Literal
 from dataclasses import dataclass, field
 from datetime import datetime
 import statistics
@@ -52,11 +66,11 @@ class PairedComparisonResult:
     sample_size_a: int
     sample_size_b: int
     
-    difference: float  # B - A (positive means B is better if higher is better)
-    percent_improvement: float  # ((B - A) / A) * 100
+    difference: float  # B - A (raw difference)
+    percent_improvement: float  # Signed improvement (positive = B better, negative = A better)
     
     timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: Dict[str, Any] = field(default_factory=dict)  # Should include 'direction': 'higher'|'lower'
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""
@@ -126,6 +140,7 @@ class PairedComparisonTest:
         self,
         test_cases: List[Any],
         metric_extractors: Dict[str, Callable[[Any], float]],
+        metric_directions: Dict[str, Literal['higher', 'lower']] = None,
         randomize: bool = True
     ) -> Dict[str, PairedComparisonResult]:
         """
@@ -138,12 +153,19 @@ class PairedComparisonTest:
             test_cases: List of test cases to run
             metric_extractors: Dict mapping metric names to functions that extract
                               metric values from results
+            metric_directions: Dict mapping metric names to direction ('higher' or 'lower').
+                             'higher' means higher values are better (e.g., accuracy, ROUGE).
+                             'lower' means lower values are better (e.g., latency, hallucination).
+                             Defaults to 'higher' for any unspecified metrics.
             randomize: Whether to randomize execution order (A then B, or B then A)
                       to control for order effects
             
         Returns:
             Dictionary of metric names to PairedComparisonResult objects
         """
+        # Default to 'higher' for backward compatibility
+        if metric_directions is None:
+            metric_directions = {}
         for test_case in test_cases:
             # Randomize execution order to control for order effects
             # (e.g., caching, warmup) but BOTH techniques always run
@@ -174,8 +196,24 @@ class PairedComparisonTest:
             std_a = statistics.stdev(values_a) if len(values_a) > 1 else 0.0
             std_b = statistics.stdev(values_b) if len(values_b) > 1 else 0.0
             
+            # Raw difference (always B - A)
             difference = mean_b - mean_a
-            percent_improvement = (difference / mean_a * 100) if mean_a != 0 else 0.0
+            
+            # Get direction for this metric (default to 'higher' for backward compatibility)
+            direction = metric_directions.get(metric_name, 'higher')
+            
+            # Calculate percent improvement based on direction
+            # For 'higher' metrics: positive difference = improvement
+            # For 'lower' metrics: negative difference = improvement (so flip sign)
+            if mean_a != 0:
+                raw_percent_change = (difference / abs(mean_a)) * 100
+                if direction == 'lower':
+                    # For "lower is better" metrics, flip the sign
+                    percent_improvement = -raw_percent_change
+                else:
+                    percent_improvement = raw_percent_change
+            else:
+                percent_improvement = 0.0
             
             ab_results[metric_name] = PairedComparisonResult(
                 technique_a_name=self.technique_a_name,
@@ -188,7 +226,8 @@ class PairedComparisonTest:
                 sample_size_a=len(values_a),
                 sample_size_b=len(values_b),
                 difference=difference,
-                percent_improvement=percent_improvement
+                percent_improvement=percent_improvement,
+                metadata={'direction': direction}
             )
         
         return ab_results
@@ -221,6 +260,10 @@ class PairedComparisonTest:
         """
         Print a summary of paired comparison test results.
         
+        Correctly interprets improvement based on metric direction stored in metadata.
+        For 'higher' metrics (e.g., accuracy): positive improvement = B better
+        For 'lower' metrics (e.g., latency): positive improvement = B better (already sign-flipped)
+        
         Args:
             ab_results: Dictionary of PairedComparisonResult objects
         """
@@ -229,17 +272,23 @@ class PairedComparisonTest:
         print(f"{'='*70}\n")
         
         for metric_name, result in ab_results.items():
-            print(f"Metric: {metric_name}")
+            direction = result.metadata.get('direction', 'higher')
+            direction_str = "↑" if direction == 'higher' else "↓"
+            
+            print(f"Metric: {metric_name} [{direction_str} {direction} is better]")
             print(f"  {self.technique_a_name}: {result.technique_a_mean:.4f} (±{result.technique_a_std:.4f})")
             print(f"  {self.technique_b_name}: {result.technique_b_mean:.4f} (±{result.technique_b_std:.4f})")
-            print(f"  Difference: {result.difference:.4f} ({result.percent_improvement:+.2f}%)")
+            print(f"  Raw Difference (B-A): {result.difference:.4f}")
+            print(f"  Improvement: {result.percent_improvement:+.2f}%")
             
+            # Since percent_improvement is already correctly signed based on direction,
+            # we can directly use it to determine which is better
             if result.percent_improvement > 0:
-                print(f"  → {self.technique_b_name} is better")
+                print(f"  ✓ {self.technique_b_name} is better")
             elif result.percent_improvement < 0:
-                print(f"  → {self.technique_a_name} is better")
+                print(f"  ✓ {self.technique_a_name} is better")
             else:
-                print("  → No significant difference")
+                print("  = No significant difference")
             print()
         
         print(f"{'='*70}\n")
