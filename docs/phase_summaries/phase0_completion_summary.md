@@ -200,7 +200,7 @@ The simple echo system provides a worst-case baseline:
 - ✅ 15-case baseline benchmark dataset
 - ✅ 3-case RAG benchmark dataset
 - ✅ Evaluation orchestration system
-- ✅ A/B testing framework
+- ✅ Paired comparison testing framework
 - ✅ Baseline evaluation results
 - ✅ Comprehensive documentation
 - ✅ Utility scripts

@@ -49,6 +49,9 @@ import random
 import json
 from pathlib import Path
 
+# Threshold for determining if a baseline value is too close to zero for percent calculation
+PERCENT_THRESHOLD = 1e-6
+
 
 @dataclass
 class PairedComparisonResult:
@@ -163,6 +166,10 @@ class PairedComparisonTest:
         Returns:
             Dictionary of metric names to PairedComparisonResult objects
         """
+        # Reset results for fresh test run
+        self.results_a = []
+        self.results_b = []
+        
         # Default to 'higher' for backward compatibility
         if metric_directions is None:
             metric_directions = {}
@@ -205,7 +212,7 @@ class PairedComparisonTest:
             # Calculate percent improvement based on direction
             # For 'higher' metrics: positive difference = improvement
             # For 'lower' metrics: negative difference = improvement (so flip sign)
-            if mean_a != 0:
+            if abs(mean_a) > PERCENT_THRESHOLD:
                 raw_percent_change = (difference / abs(mean_a)) * 100
                 if direction == 'lower':
                     # For "lower is better" metrics, flip the sign
@@ -213,7 +220,17 @@ class PairedComparisonTest:
                 else:
                     percent_improvement = raw_percent_change
             else:
-                percent_improvement = 0.0
+                # Baseline is near zero
+                if difference == 0:
+                    percent_improvement = 0.0
+                else:
+                    # Assign +/-inf based on difference sign and direction
+                    if direction == 'lower':
+                        # For "lower is better", positive diff is bad (→ -inf), negative diff is good (→ +inf)
+                        percent_improvement = float('-inf') if difference > 0 else float('inf')
+                    else:
+                        # For "higher is better", positive diff is good (→ +inf), negative diff is bad (→ -inf)
+                        percent_improvement = float('inf') if difference > 0 else float('-inf')
             
             ab_results[metric_name] = PairedComparisonResult(
                 technique_a_name=self.technique_a_name,
