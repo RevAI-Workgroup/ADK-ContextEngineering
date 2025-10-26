@@ -65,10 +65,10 @@ ADK-ContextEngineering/
 │   │   └── config.py          ✅ Configuration management
 │   ├── evaluation/
 │   │   ├── metrics.py         ✅ Metrics calculation
-│   │   ├── benchmarks.py      ✅ Dataset management
-│   │   ├── evaluator.py       ✅ Evaluation orchestrator
-│   │   └── ab_testing.py      ✅ Paired comparison framework
-│   └── [other modules]        ✅ Ready for future phases
+│   │   ├── benchmarks.py           ✅ Dataset management
+│   │   ├── evaluator.py            ✅ Evaluation orchestrator
+│   │   └── paired_comparison.py    ✅ Paired comparison framework
+│   └── [other modules]             ✅ Ready for future phases
 ├── configs/
 │   ├── models.yaml            ✅ Model configurations
 │   ├── retrieval.yaml         ✅ Retrieval settings

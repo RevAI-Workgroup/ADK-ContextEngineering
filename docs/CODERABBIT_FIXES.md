@@ -47,7 +47,7 @@ After (Corrected):
 4. Clear attribution of gains to technique
 
 **Files Fixed**:
-- `src/evaluation/ab_testing.py` - Complete refactor
+- `src/evaluation/paired_comparison.py` - Complete refactor (renamed from ab_testing.py)
 - `docs/phase_summaries/phase0_completion_summary.md`
 - `PHASE0_COMPLETE.md`
 - `README.md`

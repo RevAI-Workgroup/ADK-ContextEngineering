@@ -51,7 +51,7 @@ Created complete directory structure following best practices:
 - Generates aggregate statistics
 - Produces detailed JSON reports
 
-#### 5. A/B Testing Framework (`src/evaluation/ab_testing.py`)
+#### 5. Paired Comparison Framework (`src/evaluation/paired_comparison.py`)
 - Compare two techniques statistically
 - Randomized assignment
 - Percentage improvement calculation

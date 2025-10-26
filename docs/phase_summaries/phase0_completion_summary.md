@@ -79,7 +79,7 @@
 - Aggregate statistics calculation
 - Detailed reporting
 
-#### Paired Comparison Testing Framework (`src/evaluation/ab_testing.py`)
+#### Paired Comparison Testing Framework (`src/evaluation/paired_comparison.py`)
 - Compare techniques on identical test cases
 - Both techniques run on every input for direct measurement
 - Randomized execution order to control for order effects
