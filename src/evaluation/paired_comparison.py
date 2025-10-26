@@ -143,7 +143,7 @@ class PairedComparisonTest:
         self,
         test_cases: List[Any],
         metric_extractors: Dict[str, Callable[[Any], float]],
-        metric_directions: Dict[str, Literal['higher', 'lower']] = None,
+        metric_directions: Dict[str, Literal['higher', 'lower']] | None = None,
         randomize: bool = True
     ) -> Dict[str, PairedComparisonResult]:
         """
