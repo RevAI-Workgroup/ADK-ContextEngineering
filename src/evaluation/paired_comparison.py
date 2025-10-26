@@ -273,7 +273,7 @@ class PairedComparisonTest:
         
         for metric_name, result in ab_results.items():
             direction = result.metadata.get('direction', 'higher')
-            direction_str = "↑" if direction == 'higher' else "↓"
+            direction_str = "^" if direction == 'higher' else "v"
             
             print(f"Metric: {metric_name} [{direction_str} {direction} is better]")
             print(f"  {self.technique_a_name}: {result.technique_a_mean:.4f} (±{result.technique_a_std:.4f})")
@@ -284,11 +284,11 @@ class PairedComparisonTest:
             # Since percent_improvement is already correctly signed based on direction,
             # we can directly use it to determine which is better
             if result.percent_improvement > 0:
-                print(f"  ✓ {self.technique_b_name} is better")
+                print(f"  -> {self.technique_b_name} is better")
             elif result.percent_improvement < 0:
-                print(f"  ✓ {self.technique_a_name} is better")
+                print(f"  -> {self.technique_a_name} is better")
             else:
-                print("  = No significant difference")
+                print("  -> No significant difference")
             print()
         
         print(f"{'='*70}\n")
