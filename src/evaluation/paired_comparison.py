@@ -221,8 +221,8 @@ class PairedComparisonTest:
                     percent_improvement = raw_percent_change
             else:
                 # Baseline is near zero
-                if difference == 0:
-                    percent_improvement = 0.0
+                if abs(difference) < PERCENT_THRESHOLD:
+                    percent_improvement = 0.0                
                 else:
                     # Assign +/-inf based on difference sign and direction
                     if direction == 'lower':

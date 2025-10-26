@@ -15,7 +15,7 @@ from .metrics import MetricsCollector
 from .benchmarks import BenchmarkDataset
 
 
-class TimeoutError(Exception):
+class EvaluationTimeoutError(Exception):
     """Raised when a system call exceeds the timeout."""
     pass
 
@@ -42,7 +42,16 @@ def call_with_timeout(func: Callable, args: tuple = (), kwargs: dict = None, tim
     """
     Call a function with a timeout (cross-platform).
     
-    Works on both Unix and Windows by using threading.
+    Works on both Unix and Windows by using threading. Note that Python threads
+    cannot be forcibly terminated, so timed-out operations will continue running
+    in a daemon thread until completion. This is acceptable for evaluation
+    workloads where:
+    - Most operations complete normally within timeout
+    - Daemon threads are cleaned up on process exit
+    - The overhead of process-based isolation would be prohibitive
+    
+    For production systems requiring hard termination, consider using
+    multiprocessing.Process or subprocess with kill() support.
     
     Args:
         func: The callable to execute
@@ -54,7 +63,7 @@ def call_with_timeout(func: Callable, args: tuple = (), kwargs: dict = None, tim
         The return value of func
         
     Raises:
-        TimeoutError: If func doesn't complete within timeout_seconds
+        EvaluationTimeoutError: If func doesn't complete within timeout_seconds
         Exception: Any exception raised by func
     """
     if kwargs is None:
@@ -77,7 +86,10 @@ def call_with_timeout(func: Callable, args: tuple = (), kwargs: dict = None, tim
     # Check if thread is still alive (timeout occurred)
     if thread.is_alive():
         # Thread is still running - timeout occurred
-        raise TimeoutError(f"Operation timed out after {timeout_seconds} seconds")
+        # NOTE: The thread will continue running in the background (daemon threads
+        # cannot be force-stopped in Python). This is acceptable for evaluation
+        # workloads and the thread will be cleaned up on process exit.
+        raise EvaluationTimeoutError(f"Operation timed out after {timeout_seconds} seconds")
     
     # Check if exception occurred
     if exception_container:
@@ -192,13 +204,13 @@ class Evaluator:
                 else:
                     print(f"  -> Latency: {latency_ms:.0f}ms")
                 
-            except TimeoutError:
+            except EvaluationTimeoutError:
                 error_msg = f"Timeout after {self.timeout_seconds}s"
                 print(f"  [ERROR] {error_msg}")
                 failures.append({
                     'test_case_id': test_case.id,
                     'query': test_case.query,
-                    'error_type': 'TimeoutError',
+                    'error_type': 'EvaluationTimeoutError',
                     'error_message': error_msg,
                     'timestamp': datetime.now().isoformat()
                 })

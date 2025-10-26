@@ -5,7 +5,7 @@ Unit tests for cross-platform timeout functionality.
 import pytest
 import time
 
-from src.evaluation.evaluator import call_with_timeout, TimeoutError
+from src.evaluation.evaluator import call_with_timeout, EvaluationTimeoutError
 
 
 class TestTimeoutFunction:
@@ -44,7 +44,7 @@ class TestTimeoutFunction:
             time.sleep(10)  # Sleep for 10 seconds
             return "completed"
         
-        with pytest.raises(TimeoutError) as exc_info:
+        with pytest.raises(EvaluationTimeoutError) as exc_info:
             call_with_timeout(
                 func=slow_function,
                 timeout_seconds=1  # Timeout after 1 second
@@ -98,7 +98,7 @@ class TestTimeoutFunction:
             return "should not reach here"
         
         # This should timeout regardless of platform
-        with pytest.raises(TimeoutError):
+        with pytest.raises(EvaluationTimeoutError):
             call_with_timeout(
                 func=sleep_function,
                 timeout_seconds=1

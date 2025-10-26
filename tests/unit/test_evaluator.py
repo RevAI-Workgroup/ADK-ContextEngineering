@@ -277,7 +277,7 @@ class TestEvaluator:
         
         # Check failure details
         failure = results['failures'][0]
-        assert failure['error_type'] == 'TimeoutError'
+        assert failure['error_type'] == 'EvaluationTimeoutError'
         assert 'timeout' in failure['error_message'].lower()
         assert failure['test_case_id'] == 'timeout_001'
     
