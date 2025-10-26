@@ -175,7 +175,11 @@ class PairedComparisonTest:
             std_b = statistics.stdev(values_b) if len(values_b) > 1 else 0.0
             
             difference = mean_b - mean_a
-            percent_improvement = (difference / mean_a * 100) if mean_a != 0 else 0.0
+            if mean_a != 0:
+                percent_improvement = (difference / mean_a) * 100
+            else:
+                # undefined; preserve info
+                percent_improvement = float('inf') if mean_b > 0 else (float('-inf') if mean_b < 0 else 0.0)
             
             ab_results[metric_name] = PairedComparisonResult(
                 technique_a_name=self.technique_a_name,
