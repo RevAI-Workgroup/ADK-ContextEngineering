@@ -1,0 +1,729 @@
+{
+  "summary": {
+    "rougeL_f1_mean": 0.25086008880900734,
+    "rougeL_f1_min": 0.043478260869565216,
+    "rougeL_f1_max": 0.5555555555555556,
+    "relevance_score_mean": 0.5697582242319084,
+    "relevance_score_min": 0.375,
+    "relevance_score_max": 0.7727272727272727,
+    "rouge2_f1_mean": 0.15977338644460312,
+    "rouge2_f1_min": 0.0,
+    "rouge2_f1_max": 0.5000000000000001,
+    "rouge1_f1_mean": 0.31489046945448723,
+    "rouge1_f1_min": 0.08695652173913043,
+    "rouge1_f1_max": 0.5777777777777778,
+    "hallucination_rate_mean": 0.042222222222222223,
+    "hallucination_rate_min": 0.0,
+    "hallucination_rate_max": 0.26666666666666666,
+    "latency_ms_mean": 0.0,
+    "tokens_per_query_mean": 29.266666666666666
+  },
+  "total_evaluations": 15,
+  "results": [
+    {
+      "query": "What is the difference between a list and a tuple in Python?",
+      "response": "This is a simple response to: What is the difference between a list and a tuple in Python?",
+      "ground_truth": "Lists are mutable sequences that can be modified after creation, while tuples are immutable sequences that cannot be changed once created. Lists use square brackets [] and tuples use parentheses ().",
+      "metrics": {
+        "rouge1_f1": {
+          "value": 0.1276595744680851,
+          "metadata": {
+            "precision": 0.16666666666666666,
+            "recall": 0.10344827586206896
+          }
+        },
+        "rouge2_f1": {
+          "value": 0.0,
+          "metadata": {
+            "precision": 0.0,
+            "recall": 0.0
+          }
+        },
+        "rougeL_f1": {
+          "value": 0.1276595744680851,
+          "metadata": {
+            "precision": 0.16666666666666666,
+            "recall": 0.10344827586206896
+          }
+        },
+        "relevance_score": {
+          "value": 0.7333333333333333,
+          "metadata": {
+            "method": "jaccard_similarity",
+            "query_terms": 11,
+            "matching_terms": 11
+          }
+        },
+        "hallucination_rate": {
+          "value": 0.0,
+          "metadata": {
+            "method": "heuristic_baseline",
+            "indicators_found": 0,
+            "checks_performed": 3
+          }
+        }
+      },
+      "latency_ms": 0.0,
+      "token_count": 33,
+      "timestamp": "2025-10-26T16:29:30.443728"
+    },
+    {
+      "query": "Explain the concept of closures in JavaScript.",
+      "response": "This is a simple response to: Explain the concept of closures in JavaScript.",
+      "ground_truth": "A closure is a function that has access to variables in its outer (enclosing) lexical scope, even after the outer function has returned. Closures allow functions to maintain access to variables from their creation context.",
+      "metrics": {
+        "rouge1_f1": {
+          "value": 0.25000000000000006,
+          "metadata": {
+            "precision": 0.46153846153846156,
+            "recall": 0.17142857142857143
+          }
+        },
+        "rouge2_f1": {
+          "value": 0.04347826086956522,
+          "metadata": {
+            "precision": 0.08333333333333333,
+            "recall": 0.029411764705882353
+          }
+        },
+        "rougeL_f1": {
+          "value": 0.20833333333333331,
+          "metadata": {
+            "precision": 0.38461538461538464,
+            "recall": 0.14285714285714285
+          }
+        },
+        "relevance_score": {
+          "value": 0.5384615384615384,
+          "metadata": {
+            "method": "jaccard_similarity",
+            "query_terms": 7,
+            "matching_terms": 7
+          }
+        },
+        "hallucination_rate": {
+          "value": 0.0,
+          "metadata": {
+            "method": "heuristic_baseline",
+            "indicators_found": 0,
+            "checks_performed": 3
+          }
+        }
+      },
+      "latency_ms": 0.0,
+      "token_count": 23,
+      "timestamp": "2025-10-26T16:29:30.445728"
+    },
+    {
+      "query": "What are the CAP theorem principles in distributed systems?",
+      "response": "This is a simple response to: What are the CAP theorem principles in distributed systems?",
+      "ground_truth": "The CAP theorem states that a distributed system can only guarantee two out of three properties: Consistency (all nodes see the same data), Availability (every request receives a response), and Partition tolerance (system continues despite network partitions).",
+      "metrics": {
+        "rouge1_f1": {
+          "value": 0.2692307692307693,
+          "metadata": {
+            "precision": 0.4666666666666667,
+            "recall": 0.1891891891891892
+          }
+        },
+        "rouge2_f1": {
+          "value": 0.12,
+          "metadata": {
+            "precision": 0.21428571428571427,
+            "recall": 0.08333333333333333
+          }
+        },
+        "rougeL_f1": {
+          "value": 0.1923076923076923,
+          "metadata": {
+            "precision": 0.3333333333333333,
+            "recall": 0.13513513513513514
+          }
+        },
+        "relevance_score": {
+          "value": 0.6,
+          "metadata": {
+            "method": "jaccard_similarity",
+            "query_terms": 9,
+            "matching_terms": 9
+          }
+        },
+        "hallucination_rate": {
+          "value": 0.0,
+          "metadata": {
+            "method": "heuristic_baseline",
+            "indicators_found": 0,
+            "checks_performed": 3
+          }
+        }
+      },
+      "latency_ms": 0.0,
+      "token_count": 27,
+      "timestamp": "2025-10-26T16:29:30.445728"
+    },
+    {
+      "query": "How does gradient descent work in machine learning?",
+      "response": "This is a simple response to: How does gradient descent work in machine learning?",
+      "ground_truth": "Gradient descent is an optimization algorithm that iteratively adjusts model parameters to minimize a loss function. It computes the gradient (derivative) of the loss with respect to parameters and moves in the opposite direction of the gradient by a learning rate.",
+      "metrics": {
+        "rouge1_f1": {
+          "value": 0.2545454545454546,
+          "metadata": {
+            "precision": 0.5,
+            "recall": 0.17073170731707318
+          }
+        },
+        "rouge2_f1": {
+          "value": 0.03773584905660378,
+          "metadata": {
+            "precision": 0.07692307692307693,
+            "recall": 0.025
+          }
+        },
+        "rougeL_f1": {
+          "value": 0.18181818181818182,
+          "metadata": {
+            "precision": 0.35714285714285715,
+            "recall": 0.12195121951219512
+          }
+        },
+        "relevance_score": {
+          "value": 0.5714285714285714,
+          "metadata": {
+            "method": "jaccard_similarity",
+            "query_terms": 8,
+            "matching_terms": 8
+          }
+        },
+        "hallucination_rate": {
+          "value": 0.0,
+          "metadata": {
+            "method": "heuristic_baseline",
+            "indicators_found": 0,
+            "checks_performed": 3
+          }
+        }
+      },
+      "latency_ms": 0.0,
+      "token_count": 25,
+      "timestamp": "2025-10-26T16:29:30.446727"
+    },
+    {
+      "query": "What is a race condition in concurrent programming?",
+      "response": "This is a simple response to: What is a race condition in concurrent programming?",
+      "ground_truth": "A race condition occurs when multiple threads or processes access shared data concurrently, and the outcome depends on the unpredictable order of execution. This can lead to inconsistent or incorrect results.",
+      "metrics": {
+        "rouge1_f1": {
+          "value": 0.26666666666666666,
+          "metadata": {
+            "precision": 0.42857142857142855,
+            "recall": 0.1935483870967742
+          }
+        },
+        "rouge2_f1": {
+          "value": 0.09302325581395349,
+          "metadata": {
+            "precision": 0.15384615384615385,
+            "recall": 0.06666666666666667
+          }
+        },
+        "rougeL_f1": {
+          "value": 0.17777777777777778,
+          "metadata": {
+            "precision": 0.2857142857142857,
+            "recall": 0.12903225806451613
+          }
+        },
+        "relevance_score": {
+          "value": 0.6666666666666666,
+          "metadata": {
+            "method": "jaccard_similarity",
+            "query_terms": 8,
+            "matching_terms": 8
+          }
+        },
+        "hallucination_rate": {
+          "value": 0.0,
+          "metadata": {
+            "method": "heuristic_baseline",
+            "indicators_found": 0,
+            "checks_performed": 3
+          }
+        }
+      },
+      "latency_ms": 0.0,
+      "token_count": 25,
+      "timestamp": "2025-10-26T16:29:30.446727"
+    },
+    {
+      "query": "What causes seasons on Earth?",
+      "response": "This is a simple response to: What causes seasons on Earth?",
+      "ground_truth": "Seasons are caused by Earth's axial tilt of approximately 23.5 degrees relative to its orbital plane around the Sun. This tilt causes different parts of Earth to receive varying amounts of sunlight throughout the year.",
+      "metrics": {
+        "rouge1_f1": {
+          "value": 0.20833333333333334,
+          "metadata": {
+            "precision": 0.45454545454545453,
+            "recall": 0.13513513513513514
+          }
+        },
+        "rouge2_f1": {
+          "value": 0.0,
+          "metadata": {
+            "precision": 0.0,
+            "recall": 0.0
+          }
+        },
+        "rougeL_f1": {
+          "value": 0.125,
+          "metadata": {
+            "precision": 0.2727272727272727,
+            "recall": 0.08108108108108109
+          }
+        },
+        "relevance_score": {
+          "value": 0.45454545454545453,
+          "metadata": {
+            "method": "jaccard_similarity",
+            "query_terms": 5,
+            "matching_terms": 5
+          }
+        },
+        "hallucination_rate": {
+          "value": 0.0,
+          "metadata": {
+            "method": "heuristic_baseline",
+            "indicators_found": 0,
+            "checks_performed": 3
+          }
+        }
+      },
+      "latency_ms": 0.0,
+      "token_count": 19,
+      "timestamp": "2025-10-26T16:29:30.447727"
+    },
+    {
+      "query": "Who wrote the novel '1984'?",
+      "response": "This is a simple response to: Who wrote the novel '1984'?",
+      "ground_truth": "George Orwell wrote the dystopian novel '1984', published in 1949.",
+      "metrics": {
+        "rouge1_f1": {
+          "value": 0.380952380952381,
+          "metadata": {
+            "precision": 0.36363636363636365,
+            "recall": 0.4
+          }
+        },
+        "rouge2_f1": {
+          "value": 0.2105263157894737,
+          "metadata": {
+            "precision": 0.2,
+            "recall": 0.2222222222222222
+          }
+        },
+        "rougeL_f1": {
+          "value": 0.380952380952381,
+          "metadata": {
+            "precision": 0.36363636363636365,
+            "recall": 0.4
+          }
+        },
+        "relevance_score": {
+          "value": 0.45454545454545453,
+          "metadata": {
+            "method": "jaccard_similarity",
+            "query_terms": 5,
+            "matching_terms": 5
+          }
+        },
+        "hallucination_rate": {
+          "value": 0.16666666666666666,
+          "metadata": {
+            "method": "heuristic_baseline",
+            "indicators_found": 0.5,
+            "checks_performed": 3
+          }
+        }
+      },
+      "latency_ms": 0.0,
+      "token_count": 23,
+      "timestamp": "2025-10-26T16:29:30.448726"
+    },
+    {
+      "query": "What is photosynthesis?",
+      "response": "This is a simple response to: What is photosynthesis?",
+      "ground_truth": "Photosynthesis is the process by which plants, algae, and some bacteria convert light energy (usually from the sun) into chemical energy stored in glucose. It uses carbon dioxide and water as inputs and produces glucose and oxygen.",
+      "metrics": {
+        "rouge1_f1": {
+          "value": 0.08695652173913043,
+          "metadata": {
+            "precision": 0.2222222222222222,
+            "recall": 0.05405405405405406
+          }
+        },
+        "rouge2_f1": {
+          "value": 0.0,
+          "metadata": {
+            "precision": 0.0,
+            "recall": 0.0
+          }
+        },
+        "rougeL_f1": {
+          "value": 0.043478260869565216,
+          "metadata": {
+            "precision": 0.1111111111111111,
+            "recall": 0.02702702702702703
+          }
+        },
+        "relevance_score": {
+          "value": 0.375,
+          "metadata": {
+            "method": "jaccard_similarity",
+            "query_terms": 3,
+            "matching_terms": 3
+          }
+        },
+        "hallucination_rate": {
+          "value": 0.0,
+          "metadata": {
+            "method": "heuristic_baseline",
+            "indicators_found": 0,
+            "checks_performed": 3
+          }
+        }
+      },
+      "latency_ms": 0.0,
+      "token_count": 17,
+      "timestamp": "2025-10-26T16:29:30.448726"
+    },
+    {
+      "query": "Explain the water cycle.",
+      "response": "This is a simple response to: Explain the water cycle.",
+      "ground_truth": "The water cycle describes the continuous movement of water on, above, and below Earth's surface. It involves evaporation from water bodies, condensation into clouds, precipitation as rain or snow, and collection back into bodies of water.",
+      "metrics": {
+        "rouge1_f1": {
+          "value": 0.12765957446808512,
+          "metadata": {
+            "precision": 0.3,
+            "recall": 0.08108108108108109
+          }
+        },
+        "rouge2_f1": {
+          "value": 0.08888888888888888,
+          "metadata": {
+            "precision": 0.2222222222222222,
+            "recall": 0.05555555555555555
+          }
+        },
+        "rougeL_f1": {
+          "value": 0.12765957446808512,
+          "metadata": {
+            "precision": 0.3,
+            "recall": 0.08108108108108109
+          }
+        },
+        "relevance_score": {
+          "value": 0.4,
+          "metadata": {
+            "method": "jaccard_similarity",
+            "query_terms": 4,
+            "matching_terms": 4
+          }
+        },
+        "hallucination_rate": {
+          "value": 0.0,
+          "metadata": {
+            "method": "heuristic_baseline",
+            "indicators_found": 0,
+            "checks_performed": 3
+          }
+        }
+      },
+      "latency_ms": 0.0,
+      "token_count": 17,
+      "timestamp": "2025-10-26T16:29:30.448726"
+    },
+    {
+      "query": "If all roses are flowers and some flowers fade quickly, can we conclude that some roses fade quickly?",
+      "response": "This is a simple response to: If all roses are flowers and some flowers fade quickly, can we conclude that some roses fade quickly?",
+      "ground_truth": "No, we cannot conclude that some roses fade quickly. While all roses are flowers, the statement only tells us that SOME flowers fade quickly, not which specific types. The roses could be among the flowers that don't fade quickly.",
+      "metrics": {
+        "rouge1_f1": {
+          "value": 0.46875,
+          "metadata": {
+            "precision": 0.625,
+            "recall": 0.375
+          }
+        },
+        "rouge2_f1": {
+          "value": 0.3548387096774194,
+          "metadata": {
+            "precision": 0.4782608695652174,
+            "recall": 0.28205128205128205
+          }
+        },
+        "rougeL_f1": {
+          "value": 0.34374999999999994,
+          "metadata": {
+            "precision": 0.4583333333333333,
+            "recall": 0.275
+          }
+        },
+        "relevance_score": {
+          "value": 0.6842105263157895,
+          "metadata": {
+            "method": "jaccard_similarity",
+            "query_terms": 13,
+            "matching_terms": 13
+          }
+        },
+        "hallucination_rate": {
+          "value": 0.09999999999999999,
+          "metadata": {
+            "method": "heuristic_baseline",
+            "indicators_found": 0.3,
+            "checks_performed": 3
+          }
+        }
+      },
+      "latency_ms": 0.0,
+      "token_count": 47,
+      "timestamp": "2025-10-26T16:29:30.449727"
+    },
+    {
+      "query": "A bat and a ball cost $1.10 in total. The bat costs $1.00 more than the ball. How much does the ball cost?",
+      "response": "This is a simple response to: A bat and a ball cost $1.10 in total. The bat costs $1.00 more than the ball. How much does the ball cost?",
+      "ground_truth": "The ball costs $0.05 (5 cents). If the bat costs $1.00 more than the ball, then the bat costs $1.05. Together they equal $1.10.",
+      "metrics": {
+        "rouge1_f1": {
+          "value": 0.5423728813559322,
+          "metadata": {
+            "precision": 0.5161290322580645,
+            "recall": 0.5714285714285714
+          }
+        },
+        "rouge2_f1": {
+          "value": 0.4210526315789474,
+          "metadata": {
+            "precision": 0.4,
+            "recall": 0.4444444444444444
+          }
+        },
+        "rougeL_f1": {
+          "value": 0.44067796610169496,
+          "metadata": {
+            "precision": 0.41935483870967744,
+            "recall": 0.4642857142857143
+          }
+        },
+        "relevance_score": {
+          "value": 0.7727272727272727,
+          "metadata": {
+            "method": "jaccard_similarity",
+            "query_terms": 17,
+            "matching_terms": 17
+          }
+        },
+        "hallucination_rate": {
+          "value": 0.26666666666666666,
+          "metadata": {
+            "method": "heuristic_baseline",
+            "indicators_found": 0.8,
+            "checks_performed": 3
+          }
+        }
+      },
+      "latency_ms": 0.0,
+      "token_count": 71,
+      "timestamp": "2025-10-26T16:29:30.450726"
+    },
+    {
+      "query": "If you're running a race and you pass the person in second place, what place are you in?",
+      "response": "This is a simple response to: If you're running a race and you pass the person in second place, what place are you in?",
+      "ground_truth": "You are in second place. When you pass the person in second place, you take their position, which is second.",
+      "metrics": {
+        "rouge1_f1": {
+          "value": 0.5777777777777778,
+          "metadata": {
+            "precision": 0.52,
+            "recall": 0.65
+          }
+        },
+        "rouge2_f1": {
+          "value": 0.27906976744186046,
+          "metadata": {
+            "precision": 0.25,
+            "recall": 0.3157894736842105
+          }
+        },
+        "rougeL_f1": {
+          "value": 0.39999999999999997,
+          "metadata": {
+            "precision": 0.36,
+            "recall": 0.45
+          }
+        },
+        "relevance_score": {
+          "value": 0.75,
+          "metadata": {
+            "method": "jaccard_similarity",
+            "query_terms": 15,
+            "matching_terms": 15
+          }
+        },
+        "hallucination_rate": {
+          "value": 0.09999999999999999,
+          "metadata": {
+            "method": "heuristic_baseline",
+            "indicators_found": 0.3,
+            "checks_performed": 3
+          }
+        }
+      },
+      "latency_ms": 0.0,
+      "token_count": 49,
+      "timestamp": "2025-10-26T16:29:30.450726"
+    },
+    {
+      "query": "What is the capital of Australia?",
+      "response": "This is a simple response to: What is the capital of Australia?",
+      "ground_truth": "Canberra is the capital of Australia.",
+      "metrics": {
+        "rouge1_f1": {
+          "value": 0.5555555555555556,
+          "metadata": {
+            "precision": 0.4166666666666667,
+            "recall": 0.8333333333333334
+          }
+        },
+        "rouge2_f1": {
+          "value": 0.5000000000000001,
+          "metadata": {
+            "precision": 0.36363636363636365,
+            "recall": 0.8
+          }
+        },
+        "rougeL_f1": {
+          "value": 0.5555555555555556,
+          "metadata": {
+            "precision": 0.4166666666666667,
+            "recall": 0.8333333333333334
+          }
+        },
+        "relevance_score": {
+          "value": 0.5454545454545454,
+          "metadata": {
+            "method": "jaccard_similarity",
+            "query_terms": 6,
+            "matching_terms": 6
+          }
+        },
+        "hallucination_rate": {
+          "value": 0.0,
+          "metadata": {
+            "method": "heuristic_baseline",
+            "indicators_found": 0,
+            "checks_performed": 3
+          }
+        }
+      },
+      "latency_ms": 0.0,
+      "token_count": 21,
+      "timestamp": "2025-10-26T16:29:30.451754"
+    },
+    {
+      "query": "How many chromosomes do humans have?",
+      "response": "This is a simple response to: How many chromosomes do humans have?",
+      "ground_truth": "Humans have 46 chromosomes (23 pairs) in each cell, except for reproductive cells which have 23 chromosomes.",
+      "metrics": {
+        "rouge1_f1": {
+          "value": 0.20689655172413793,
+          "metadata": {
+            "precision": 0.25,
+            "recall": 0.17647058823529413
+          }
+        },
+        "rouge2_f1": {
+          "value": 0.07407407407407407,
+          "metadata": {
+            "precision": 0.09090909090909091,
+            "recall": 0.0625
+          }
+        },
+        "rougeL_f1": {
+          "value": 0.13793103448275862,
+          "metadata": {
+            "precision": 0.16666666666666666,
+            "recall": 0.11764705882352941
+          }
+        },
+        "relevance_score": {
+          "value": 0.5,
+          "metadata": {
+            "method": "jaccard_similarity",
+            "query_terms": 6,
+            "matching_terms": 6
+          }
+        },
+        "hallucination_rate": {
+          "value": 0.0,
+          "metadata": {
+            "method": "heuristic_baseline",
+            "indicators_found": 0,
+            "checks_performed": 3
+          }
+        }
+      },
+      "latency_ms": 0.0,
+      "token_count": 21,
+      "timestamp": "2025-10-26T16:29:30.451754"
+    },
+    {
+      "query": "When was the United Nations founded?",
+      "response": "This is a simple response to: When was the United Nations founded?",
+      "ground_truth": "The United Nations was founded on October 24, 1945, after World War II.",
+      "metrics": {
+        "rouge1_f1": {
+          "value": 0.4,
+          "metadata": {
+            "precision": 0.4166666666666667,
+            "recall": 0.38461538461538464
+          }
+        },
+        "rouge2_f1": {
+          "value": 0.17391304347826086,
+          "metadata": {
+            "precision": 0.18181818181818182,
+            "recall": 0.16666666666666666
+          }
+        },
+        "rougeL_f1": {
+          "value": 0.32,
+          "metadata": {
+            "precision": 0.3333333333333333,
+            "recall": 0.3076923076923077
+          }
+        },
+        "relevance_score": {
+          "value": 0.5,
+          "metadata": {
+            "method": "jaccard_similarity",
+            "query_terms": 6,
+            "matching_terms": 6
+          }
+        },
+        "hallucination_rate": {
+          "value": 0.0,
+          "metadata": {
+            "method": "heuristic_baseline",
+            "indicators_found": 0,
+            "checks_performed": 3
+          }
+        }
+      },
+      "latency_ms": 0.0,
+      "token_count": 21,
+      "timestamp": "2025-10-26T16:29:30.452727"
+    }
+  ]
+}
