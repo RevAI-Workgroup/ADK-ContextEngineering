@@ -1,0 +1,40 @@
+{
+  "name": "rag",
+  "total_cases": 3,
+  "test_cases": [
+    {
+      "id": "rag_001",
+      "query": "According to the project documentation, what is the purpose of Phase 3?",
+      "ground_truth": null,
+      "context": "",
+      "category": "document_qa",
+      "difficulty": "easy",
+      "metadata": {
+        "requires_context": true
+      }
+    },
+    {
+      "id": "rag_002",
+      "query": "What are the key metrics tracked in the evaluation framework?",
+      "ground_truth": null,
+      "context": "",
+      "category": "document_qa",
+      "difficulty": "medium",
+      "metadata": {
+        "requires_context": true
+      }
+    },
+    {
+      "id": "rag_003",
+      "query": "Compare the chunking strategies mentioned in the retrieval configuration.",
+      "ground_truth": null,
+      "context": "",
+      "category": "document_qa",
+      "difficulty": "hard",
+      "metadata": {
+        "requires_context": true,
+        "requires_comparison": true
+      }
+    }
+  ]
+}

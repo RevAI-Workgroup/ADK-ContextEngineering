@@ -1,0 +1,41 @@
+# Model Configuration
+# This file allows easy switching between different LLMs
+
+ollama:
+  base_url: "http://localhost:11434"
+  timeout: 120
+  
+  # Primary model configuration
+  primary_model:
+    name: "qwen2.5:latest"
+    temperature: 0.7
+    max_tokens: 4096
+    top_p: 0.9
+    top_k: 40
+  
+  # Alternative models for experimentation
+  alternative_models:
+    - name: "llama3.1:8b"
+      temperature: 0.7
+      max_tokens: 4096
+    - name: "mistral:7b"
+      temperature: 0.7
+      max_tokens: 4096
+    - name: "gemma2:9b"
+      temperature: 0.7
+      max_tokens: 4096
+
+# Embedding model configuration
+embeddings:
+  model_name: "sentence-transformers/all-MiniLM-L6-v2"
+  dimension: 384
+  batch_size: 32
+  normalize: true
+  cache_embeddings: true
+
+# Reranking model configuration (for Phase 3+)
+reranker:
+  model_name: "cross-encoder/ms-marco-MiniLM-L-6-v2"
+  batch_size: 16
+  enabled: false
+

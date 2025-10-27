@@ -1,0 +1,55 @@
+# Core Dependencies
+python-dotenv==1.0.0
+
+# Google ADK
+google-genai==0.4.0
+
+# Ollama
+ollama==0.4.4
+
+# Vector Database
+chromadb==0.5.23
+
+# Embeddings
+sentence-transformers==3.3.1
+
+# API Framework
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.3
+pydantic-settings==2.6.1
+
+# Text Processing
+nltk==3.9.1
+tiktoken==0.8.0
+
+# Search & Retrieval
+rank-bm25==0.2.2
+
+# Evaluation & Metrics
+rouge-score==0.1.2
+sacrebleu==2.4.3
+
+# Testing
+pytest==8.3.4
+pytest-asyncio==0.24.0
+pytest-cov==6.0.0
+pytest-benchmark==5.1.0
+
+# Utilities
+pyyaml==6.0.2
+requests==2.32.3
+aiohttp==3.11.10
+tqdm==4.67.1
+
+# Logging
+loguru==0.7.3
+
+# Data Handling
+pandas==2.2.3
+numpy==2.2.1
+
+# Jupyter (for experiments)
+jupyter==1.1.1
+ipykernel==6.29.5
+
