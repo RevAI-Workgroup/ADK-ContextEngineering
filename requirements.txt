@@ -2,7 +2,8 @@
 python-dotenv==1.0.0
 
 # Google ADK
-google-genai==0.4.0
+google-adk>=1.0.0
+litellm>=1.70.0
 
 # Ollama
 ollama==0.4.4
