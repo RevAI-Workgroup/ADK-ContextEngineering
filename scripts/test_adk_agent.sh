@@ -22,10 +22,9 @@ fi
 echo "✓ adk binary found: $(command -v adk)"
 
 # Check for context_engineering_agent
-if ! adk run --list 2>&1 | grep -F -q "context_engineering_agent"; then
-    echo "ERROR: 'context_engineering_agent' not found in available agents" >&2
-    echo "Available agents:" >&2
-    adk run --list >&2
+if [ ! -d "context_engineering_agent" ]; then
+    echo "ERROR: 'context_engineering_agent' directory not found" >&2
+    echo "Please ensure you're running this script from the project root directory" >&2
     exit 1
 fi
 echo "✓ context_engineering_agent found"
@@ -53,8 +52,9 @@ run_test() {
 
     # Run the agent and capture stdout/stderr
     # Temporarily disable pipefail to capture the exit code without exiting
+    # Send query followed by "exit" to properly terminate the interactive session
     set +e
-    echo "$query" | adk run context_engineering_agent > "$output_file" 2>&1
+    (echo "$query"; echo "exit") | adk run context_engineering_agent > "$output_file" 2>&1
     local exit_code=$?
     set -e
 
@@ -106,21 +106,21 @@ run_test \
     "Calculator Tool" \
     "What is 15 multiplied by 7?" \
     "105" \
-    "Calculator"
+    "calculate"
 
 # Test 2: Text Analysis Tool
 run_test \
     "Text Analysis Tool" \
     "Analyze this text: The quick brown fox jumps over the lazy dog" \
     "word_count" \
-    "Text Analysis"
+    "analyze_text"
 
 # Test 3: Time Tool
 run_test \
     "Time Tool" \
     "What's the current time in Asia/Tokyo?" \
     "Asia/Tokyo" \
-    "Time"
+    "get_current_time"
 
 # Test 4: General Query (no tool)
 run_test \
