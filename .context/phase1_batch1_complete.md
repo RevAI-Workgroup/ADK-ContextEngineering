@@ -164,18 +164,18 @@ except SpecificError as e:
 
 **What was done:**
 - Updated existing configuration system (already solid from Phase 0)
-- Modified `configs/models.yaml` to use `qwen3:14b` (tool calling support)
+- Modified `configs/models.yaml` to use `qwen3:4b` (tool calling support)
 - Agent reads config automatically via `get_config()`
 - No code changes needed - leveraged existing Config class
 
 **Files Modified:**
-- [configs/models.yaml](../configs/models.yaml) - Changed primary model to qwen3:14b
+- [configs/models.yaml](../configs/models.yaml) - Changed primary model to qwen3:4b
 - [src/core/__init__.py](../src/core/__init__.py) - Added agent exports
 
 **Configuration Usage:**
 ```python
 config = get_config()
-model_name = config.get("models.ollama.primary_model.name", "qwen3:14b")
+model_name = config.get("models.ollama.primary_model.name", "qwen3:4b")
 temperature = config.get("models.ollama.primary_model.temperature", 0.7)
 max_tokens = config.get("models.ollama.primary_model.max_tokens", 4096)
 ```
@@ -187,7 +187,7 @@ ollama:
   timeout: 120
 
   primary_model:
-    name: "qwen3:14b"  # ← Changed from qwen2.5:latest
+    name: "qwen3:4b"  # ← Changed from qwen2.5:latest
     temperature: 0.7
     max_tokens: 4096
 ```
@@ -216,7 +216,7 @@ Quick manual testing script for validating agent and tools:
 
 ## Model Setup
 
-**Model Downloaded**: `qwen3:14b` (9.3 GB)
+**Model Downloaded**: `qwen3:4b` (2.5 GB)
 - Tool calling support: ✅
 - Reasoning capabilities: Excellent
 - Context window: 128K tokens
@@ -224,7 +224,7 @@ Quick manual testing script for validating agent and tools:
 
 **Command Used:**
 ```bash
-ollama pull qwen3:14b
+ollama pull qwen3:4b
 ```
 
 ---
@@ -302,7 +302,7 @@ Ready to implement:
 
 ```bash
 # 1. Ensure Ollama is running
-ollama list  # Should show qwen3:14b
+ollama list  # Should show qwen3:4b
 
 # 2. Run manual test
 python3 scripts/test_agent_manual.py
@@ -338,7 +338,7 @@ python3 scripts/test_agent_manual.py
 - ✅ Comprehensive logging throughout
 - ✅ Configuration system integrated
 - ✅ Error handling at every level
-- ✅ Model downloaded (qwen3:14b, 9.3GB)
+- ✅ Model downloaded (qwen3:4b, 2.5GB)
 - ✅ Test script created for validation
 
 **Batch 1 Status: COMPLETE AND READY FOR BATCH 2** 🎉

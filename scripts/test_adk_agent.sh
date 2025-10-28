@@ -34,6 +34,17 @@ echo ""
 TESTS_PASSED=0
 TESTS_FAILED=0
 
+# Array to track temporary files for cleanup
+declare -a TEMP_FILES=()
+
+# Cleanup function to ensure temp files are removed on exit
+cleanup() {
+    for file in "${TEMP_FILES[@]}"; do
+        rm -f "$file" 2>/dev/null || true
+    done
+}
+trap cleanup EXIT
+
 # Helper function to run a test with validation
 # Usage: run_test <test_name> <query> <expected_pattern> [tool_name]
 run_test() {
@@ -48,7 +59,8 @@ run_test() {
 
     # Create temporary file to capture output
     local output_file
-    output_file=$(mktemp)
+    output_file=$(mktemp) || { echo "Failed to create temp file" >&2; return 1; }
+    TEMP_FILES+=("$output_file")
 
     # Run the agent and capture stdout/stderr
     # Temporarily disable pipefail to capture the exit code without exiting
@@ -66,7 +78,6 @@ run_test() {
     if [ $exit_code -ne 0 ]; then
         echo "❌ FAIL: Agent command exited with code $exit_code"
         TESTS_FAILED=$((TESTS_FAILED + 1))
-        rm -f "$output_file"
         return 1
     fi
 
@@ -81,7 +92,6 @@ run_test() {
             else
                 echo "❌ FAIL: Tool '$tool_name' was NOT invoked"
                 TESTS_FAILED=$((TESTS_FAILED + 1))
-                rm -f "$output_file"
                 return 1
             fi
         fi
@@ -90,12 +100,9 @@ run_test() {
     else
         echo "❌ FAIL: Expected pattern '$expected_pattern' not found in output"
         TESTS_FAILED=$((TESTS_FAILED + 1))
-        rm -f "$output_file"
         return 1
     fi
 
-    # Cleanup
-    rm -f "$output_file"
     echo "------------------------------------------------------------------------"
     echo ""
     return 0

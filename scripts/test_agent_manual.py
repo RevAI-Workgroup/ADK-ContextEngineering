@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 Manual test script for ADK agent.
 

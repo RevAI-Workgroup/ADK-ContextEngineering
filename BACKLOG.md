@@ -551,7 +551,7 @@ context-engineering-sandbox/
   - `count_words`: Word counting (tested: 6 words) ✅
   - `get_current_time`: Timezone queries (tested: America/New_York) ✅
   - `analyze_text`: Text analysis (ready) ✅
-- ✅ Model qwen3:4b (9.3GB) downloaded and verified working
+- ✅ Model qwen3:4b (2.5GB) downloaded and verified working
 - ✅ Agent successfully runs via `adk run context_engineering_agent`
 - ✅ Tool calling verified: Agent correctly selects and uses tools
 - ✅ Created comprehensive Phase 1 summary: `docs/phase_summaries/phase1_summary.md`
