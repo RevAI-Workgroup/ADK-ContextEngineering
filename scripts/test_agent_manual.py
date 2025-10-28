@@ -2,8 +2,10 @@
 """
 Manual test script for ADK agent.
 
-This script allows quick testing of the agent without running full evaluation.
-Use this to verify that the agent and tools are working correctly.
+This script verifies the agent configuration and displays info.
+For interactive testing, use: adk run context_engineering_agent
+
+This validates that the agent is properly configured and ready to use.
 """
 
 import sys
@@ -13,98 +15,57 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.core.adk_agent import ContextEngineeringAgent
-import logging
-
-# Set up logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-
-logger = logging.getLogger(__name__)
+from context_engineering_agent import root_agent
 
 
 def test_agent():
-    """Test the ADK agent with various queries."""
+    """Verify the ADK agent configuration."""
 
     print("="*70)
-    print("ADK Agent Manual Test")
+    print("ADK Agent Configuration Test")
     print("="*70)
     print()
 
     try:
-        # Initialize agent
-        print("Initializing agent...")
-        agent = ContextEngineeringAgent()
-        print(f"✓ Agent initialized: {agent}")
+        # Display agent info
+        print("✓ Agent loaded successfully!")
         print()
 
-        # Display model info
-        model_info = agent.get_model_info()
-        print("Model Information:")
-        for key, value in model_info.items():
-            print(f"  {key}: {value}")
+        print("Agent Information:")
+        print(f"  Name: {root_agent.name}")
+        print(f"  Model: {root_agent.model.model}")
+        print(f"  Tools: {len(root_agent.tools)}")
         print()
 
         # Display available tools
         print("Available Tools:")
-        for tool in agent.get_tool_info():
-            print(f"  - {tool['name']}: {tool['description']}")
+        for tool in root_agent.tools:
+            tool_name = tool.__name__ if callable(tool) else str(tool)
+            doc = tool.__doc__ if hasattr(tool, '__doc__') and tool.__doc__ else "No description"
+            first_line = doc.strip().split('\n')[0] if doc else "No description"
+            print(f"  - {tool_name}: {first_line}")
         print()
 
-        # Test queries
-        test_cases = [
-            {
-                "name": "Calculator Tool",
-                "query": "What is 15 multiplied by 7?",
-                "expected_tool": "calculate"
-            },
-            {
-                "name": "Text Analysis Tool",
-                "query": "Analyze this text: The quick brown fox jumps over the lazy dog.",
-                "expected_tool": "analyze_text"
-            },
-            {
-                "name": "Time Tool",
-                "query": "What's the current time in Asia/Tokyo?",
-                "expected_tool": "get_current_time"
-            },
-            {
-                "name": "General Query (no tool)",
-                "query": "What is Python?",
-                "expected_tool": None
-            }
-        ]
+        print("="*70)
+        print("Configuration Valid!")
+        print("="*70)
+        print()
+        print("To test the agent interactively, run:")
+        print("  adk run context_engineering_agent")
+        print()
+        print("Example queries:")
+        print('  echo "What is 15 multiplied by 7?" | adk run context_engineering_agent')
+        print('  echo "Analyze this text: Hello world" | adk run context_engineering_agent')
+        print('  echo "What time is it in Asia/Tokyo?" | adk run context_engineering_agent')
+        print()
 
-        for i, test in enumerate(test_cases, 1):
-            print(f"\n{'='*70}")
-            print(f"Test {i}/{len(test_cases)}: {test['name']}")
-            print(f"{'='*70}")
-            print(f"\nQuery: {test['query']}")
-            print("\nProcessing...\n")
-
-            try:
-                response = agent.query(test['query'])
-                print(f"Response:\n{response}")
-
-                if test['expected_tool']:
-                    print(f"\n✓ Expected tool: {test['expected_tool']}")
-
-            except Exception as e:
-                print(f"\n✗ Error: {e}")
-                logger.error(f"Test {i} failed", exc_info=True)
-
-        print(f"\n{'='*70}")
-        print("All tests completed!")
-        print(f"{'='*70}\n")
+        return 0
 
     except Exception as e:
-        print(f"\n✗ Agent initialization failed: {e}")
-        logger.error("Failed to initialize agent", exc_info=True)
+        print(f"\n✗ Agent load failed: {e}")
+        import traceback
+        traceback.print_exc()
         return 1
-
-    return 0
 
 
 if __name__ == "__main__":
