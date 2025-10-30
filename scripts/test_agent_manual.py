@@ -19,7 +19,14 @@ from context_engineering_agent import root_agent
 
 
 def test_agent():
-    """Verify the ADK agent configuration."""
+    """
+    Verify the ADK agent configuration and display agent metadata, available tools, and example usage instructions.
+    
+    Prints the agent's name, model, tool count, a list of available tools with their brief descriptions, and interactive run examples to help manually validate the agent setup.
+    
+    Returns:
+        int: 0 on successful validation, 1 if an error occurred.
+    """
 
     print("="*70)
     print("ADK Agent Configuration Test")

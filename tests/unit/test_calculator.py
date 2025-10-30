@@ -231,6 +231,11 @@ class TestCalculatorErrorHandling:
     """Test error handling and error messages."""
 
     def test_zero_division_error(self):
+        """
+        Verify that dividing by zero is reported as an error with the expected message.
+        
+        Asserts that calculating "5 / 0" yields a result with status "error" and an error_message equal to "Cannot divide by zero".
+        """
         result = calculate("5 / 0")
         assert result["status"] == "error"
         assert result["error_message"] == "Cannot divide by zero"
@@ -273,11 +278,19 @@ class TestCalculatorEdgeCases:
         assert abs(result["result"] - 0.3) < 0.0001
 
     def test_very_small_numbers(self):
+        """
+        Verify the calculator correctly evaluates a very small numeric expression and returns the expected result.
+        """
         result = calculate("1 / 10000000")
         assert result["status"] == "success"
         assert result["result"] == 0.0000001
 
     def test_negative_exponent(self):
+        """
+        Verify that negative integer exponents produce the expected fractional result.
+        
+        Asserts that evaluating the expression "2 ** -3" returns a success status and a numeric result equal to 0.125.
+        """
         result = calculate("2 ** -3")
         assert result["status"] == "success"
         assert result["result"] == 0.125
@@ -288,6 +301,11 @@ class TestCalculatorEdgeCases:
         assert result["result"] == 2.0
 
     def test_parentheses_precedence(self):
+        """
+        Verify that parentheses change operator precedence so the grouped addition is evaluated before multiplication.
+        
+        Asserts that calculating "(2 + 3) * 4" produces a success status and a numeric result of 20.0.
+        """
         result = calculate("(2 + 3) * 4")
         assert result["status"] == "success"
         assert result["result"] == 20.0

@@ -10,26 +10,22 @@ from typing import Any, Dict
 
 def analyze_text(text: str) -> Dict[str, Any]:
     """
-    Analyze text and return comprehensive statistics.
-
-    Provides word count, character count, sentence count, paragraph count,
-    average word length, and unique word count.
-
-    Args:
-        text: Text to analyze
-
+    Compute comprehensive statistics for the given text.
+    
+    Returns a dictionary with a "status" key and the following metrics when successful:
+    - word_count: total number of whitespace-separated tokens
+    - unique_word_count: count of distinct words (case-insensitive)
+    - character_count: total characters including whitespace
+    - character_count_no_spaces: characters excluding spaces, tabs, and newlines
+    - sentence_count: number of sentence-ending punctuation sequences ('.', '!', '?'), at least 1 if text is present
+    - paragraph_count: number of non-empty paragraphs separated by blank lines, at least 1 if text is present
+    - line_count: number of non-empty lines
+    - average_word_length: average length of words rounded to 2 decimals
+    - vocabulary_richness: ratio of unique_word_count to word_count rounded to 2 decimals
+    
     Returns:
-        dict: Comprehensive text statistics with status
-
-    Examples:
-        >>> analyze_text("Hello world. This is a test.")
-        {
-            "status": "success",
-            "word_count": 6,
-            "character_count": 28,
-            "sentence_count": 2,
-            ...
-        }
+        dict: A result dictionary. On success, contains "status": "success" and the metrics above.
+              On failure or invalid input, contains "status": "error" and "error_message".
     """
     try:
         # Basic validation
@@ -87,20 +83,13 @@ def analyze_text(text: str) -> Dict[str, Any]:
 
 def count_words(text: str) -> Dict[str, Any]:
     """
-    Count the number of words in the given text.
-
-    This is a simpler version of analyze_text that only returns word count.
-    Useful when you just need a quick word count without full analysis.
-
-    Args:
-        text: Text to count words in
-
+    Compute word count and a short text preview for the given text.
+    
+    If the input is empty or only whitespace, returns an error dictionary describing the problem.
+    
     Returns:
-        dict: Word count with status
-
-    Examples:
-        >>> count_words("Hello world")
-        {"status": "success", "word_count": 2, "text_preview": "Hello world"}
+        dict: On success, contains "status" = "success", "word_count" (int), and "text_preview" (str).
+              On error, contains "status" = "error" and "error_message" (str).
     """
     try:
         if not text or not text.strip():

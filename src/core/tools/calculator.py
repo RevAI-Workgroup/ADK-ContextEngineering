@@ -49,17 +49,19 @@ def _count_ast_nodes(node: ast.AST) -> int:
 
 def _safe_eval(node: ast.AST) -> Union[int, float]:
     """
-    Safely evaluate an AST node containing only allowed operations.
-
-    Args:
-        node: AST node to evaluate
-
+    Evaluate an AST expression composed only of allowed numeric operations and return its numeric result.
+    
+    Accepts AST nodes representing numeric constants, binary operations, and unary operations restricted to the operators in ALLOWED_OPERATORS. Enforces safety checks including: rejection of non-numeric and boolean constants, rejection of non-finite floats, bounding of exponent values for power operations, detection of obvious power overflow, and validation that intermediate and final results are finite.
+    
+    Parameters:
+        node (ast.AST): AST node to evaluate; must be an expression tree made of allowed node types.
+    
     Returns:
-        Result of the evaluation
-
+        int | float: The numeric result of evaluating the AST.
+    
     Raises:
-        ValueError: If the expression contains disallowed operations or produces invalid results
-        TypeError: If the expression contains non-numeric types
+        TypeError: If a constant is not an int/float or if a boolean constant is provided.
+        ValueError: If the node type or operator is not allowed, if numeric values are non-finite, if an exponent exceeds MAX_POW_EXPONENT, or if an operation would produce an overflow or otherwise invalid result.
     """
     if isinstance(node, ast.Constant):
         value = node.value
@@ -120,23 +122,19 @@ def _safe_eval(node: ast.AST) -> Union[int, float]:
 
 def calculate(expression: str) -> Dict[str, Any]:
     """
-    Perform basic arithmetic calculations safely.
-
-    Supports addition (+), subtraction (-), multiplication (*), division (/),
-    floor division (//), modulo (%), and exponentiation (**).
-
-    Args:
-        expression: Mathematical expression to evaluate (e.g., "2 + 2", "10 * 5", "2 ** 8")
-
+    Evaluate a limited arithmetic expression in a restricted, safe environment.
+    
+    Supports the operators: +, -, *, /, //, %, and **. The function enforces input length
+    and AST node-count limits and validates numeric results to prevent abuse or
+    unsafe results.
+    
+    Parameters:
+        expression (str): Mathematical expression to evaluate, e.g. "2 + 2" or "3**4".
+    
     Returns:
-        dict: Result with status and value or error message
-
-    Examples:
-        >>> calculate("2 + 2")
-        {"status": "success", "expression": "2 + 2", "result": 4.0}
-
-        >>> calculate("10 / 3")
-        {"status": "success", "expression": "10 / 3", "result": 3.333...}
+        dict: A result object with one of the following shapes:
+            - Success: {"status": "success", "expression": <input>, "result": <float>}
+            - Error:   {"status": "error", "expression": <input>, "error_message": <string>}
     """
     try:
         # Validate input length to prevent DoS

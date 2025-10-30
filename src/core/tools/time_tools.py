@@ -12,33 +12,22 @@ from typing import Any, Dict
 
 def get_current_time(city: str) -> Dict[str, Any]:
     """
-    Get the current time in a specified city or timezone.
-
-    Supports both city names (e.g., "Tokyo") and timezone identifiers
-    (e.g., "Asia/Tokyo", "America/New_York").
-
-    Args:
-        city: City name or timezone identifier (e.g., "Tokyo", "Asia/Tokyo", "America/New_York")
-
+    Return the current time for a given city name or timezone identifier.
+    
+    Parameters:
+        city (str): City name or timezone identifier (e.g., "Tokyo", "Asia/Tokyo", "America/New_York").
+    
     Returns:
-        dict: Current time information with status
-
-    Examples:
-        >>> get_current_time("Tokyo")
-        {
-            "status": "success",
-            "city": "Tokyo",
-            "time": "2025-10-27 15:30:45 JST+0900",
-            "timezone": "Asia/Tokyo"
-        }
-
-        >>> get_current_time("America/New_York")
-        {
-            "status": "success",
-            "city": "America/New_York",
-            "time": "2025-10-27 02:30:45 EDT-0400",
-            "timezone": "America/New_York"
-        }
+        dict: On success, a dictionary with:
+            - status: "success"
+            - city: the input `city`
+            - time: formatted local time as "YYYY-MM-DD HH:MM:SS TZ±HHMM" (e.g., "2025-10-27 15:30:45 JST+0900")
+            - timezone: string representation of the resolved timezone (e.g., "Asia/Tokyo")
+            - iso_format: ISO 8601 representation of the current time
+          On error, a dictionary with:
+            - status: "error"
+            - city: the input `city`
+            - error_message: a human-readable explanation of the failure (may suggest valid timezone identifiers)
     """
     try:
         # Try to create timezone - this will raise an exception if invalid

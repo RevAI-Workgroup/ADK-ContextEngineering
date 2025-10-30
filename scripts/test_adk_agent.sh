@@ -37,7 +37,7 @@ TESTS_FAILED=0
 # Array to track temporary files for cleanup
 declare -a TEMP_FILES=()
 
-# Cleanup function to ensure temp files are removed on exit
+# cleanup removes all temporary files tracked in the TEMP_FILES array.
 cleanup() {
     for file in "${TEMP_FILES[@]}"; do
         rm -f "$file" 2>/dev/null || true
@@ -46,7 +46,7 @@ cleanup() {
 trap cleanup EXIT
 
 # Helper function to run a test with validation
-# Usage: run_test <test_name> <query> <expected_pattern> [tool_name]
+# run_test executes an ADK agent test by sending a query to the context_engineering_agent, capturing output, checking for an expected pattern and optional tool invocation, and updating global TESTS_PASSED/TESTS_FAILED counters.
 run_test() {
     local test_name="$1"
     local query="$2"
