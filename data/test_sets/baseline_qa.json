@@ -1,0 +1,141 @@
+{
+  "name": "baseline",
+  "total_cases": 15,
+  "test_cases": [
+    {
+      "id": "tech_001",
+      "query": "What is the difference between a list and a tuple in Python?",
+      "ground_truth": "Lists are mutable sequences that can be modified after creation, while tuples are immutable sequences that cannot be changed once created. Lists use square brackets [] and tuples use parentheses ().",
+      "context": "",
+      "category": "technical",
+      "difficulty": "easy",
+      "metadata": {}
+    },
+    {
+      "id": "tech_002",
+      "query": "Explain the concept of closures in JavaScript.",
+      "ground_truth": "A closure is a function that has access to variables in its outer (enclosing) lexical scope, even after the outer function has returned. Closures allow functions to maintain access to variables from their creation context.",
+      "context": "",
+      "category": "technical",
+      "difficulty": "medium",
+      "metadata": {}
+    },
+    {
+      "id": "tech_003",
+      "query": "What are the CAP theorem principles in distributed systems?",
+      "ground_truth": "The CAP theorem states that a distributed system can only guarantee two out of three properties: Consistency (all nodes see the same data), Availability (every request receives a response), and Partition tolerance (system continues despite network partitions).",
+      "context": "",
+      "category": "technical",
+      "difficulty": "hard",
+      "metadata": {}
+    },
+    {
+      "id": "tech_004",
+      "query": "How does gradient descent work in machine learning?",
+      "ground_truth": "Gradient descent is an optimization algorithm that iteratively adjusts model parameters to minimize a loss function. It computes the gradient (derivative) of the loss with respect to parameters and moves in the opposite direction of the gradient by a learning rate.",
+      "context": "",
+      "category": "technical",
+      "difficulty": "medium",
+      "metadata": {}
+    },
+    {
+      "id": "tech_005",
+      "query": "What is a race condition in concurrent programming?",
+      "ground_truth": "A race condition occurs when multiple threads or processes access shared data concurrently, and the outcome depends on the unpredictable order of execution. This can lead to inconsistent or incorrect results.",
+      "context": "",
+      "category": "technical",
+      "difficulty": "medium",
+      "metadata": {}
+    },
+    {
+      "id": "gen_001",
+      "query": "What causes seasons on Earth?",
+      "ground_truth": "Seasons are caused by Earth's axial tilt of approximately 23.5 degrees relative to its orbital plane around the Sun. This tilt causes different parts of Earth to receive varying amounts of sunlight throughout the year.",
+      "context": "",
+      "category": "general",
+      "difficulty": "easy",
+      "metadata": {}
+    },
+    {
+      "id": "gen_002",
+      "query": "Who wrote the novel '1984'?",
+      "ground_truth": "George Orwell wrote the dystopian novel '1984', published in 1949.",
+      "context": "",
+      "category": "general",
+      "difficulty": "easy",
+      "metadata": {}
+    },
+    {
+      "id": "gen_003",
+      "query": "What is photosynthesis?",
+      "ground_truth": "Photosynthesis is the process by which plants, algae, and some bacteria convert light energy (usually from the sun) into chemical energy stored in glucose. It uses carbon dioxide and water as inputs and produces glucose and oxygen.",
+      "context": "",
+      "category": "general",
+      "difficulty": "easy",
+      "metadata": {}
+    },
+    {
+      "id": "gen_004",
+      "query": "Explain the water cycle.",
+      "ground_truth": "The water cycle describes the continuous movement of water on, above, and below Earth's surface. It involves evaporation from water bodies, condensation into clouds, precipitation as rain or snow, and collection back into bodies of water.",
+      "context": "",
+      "category": "general",
+      "difficulty": "medium",
+      "metadata": {}
+    },
+    {
+      "id": "reason_001",
+      "query": "If all roses are flowers and some flowers fade quickly, can we conclude that some roses fade quickly?",
+      "ground_truth": "No, we cannot conclude that some roses fade quickly. While all roses are flowers, the statement only tells us that SOME flowers fade quickly, not which specific types. The roses could be among the flowers that don't fade quickly.",
+      "context": "",
+      "category": "reasoning",
+      "difficulty": "hard",
+      "metadata": {}
+    },
+    {
+      "id": "reason_002",
+      "query": "A bat and a ball cost $1.10 in total. The bat costs $1.00 more than the ball. How much does the ball cost?",
+      "ground_truth": "The ball costs $0.05 (5 cents). If the bat costs $1.00 more than the ball, then the bat costs $1.05. Together they equal $1.10.",
+      "context": "",
+      "category": "reasoning",
+      "difficulty": "medium",
+      "metadata": {}
+    },
+    {
+      "id": "reason_003",
+      "query": "If you're running a race and you pass the person in second place, what place are you in?",
+      "ground_truth": "You are in second place. When you pass the person in second place, you take their position, which is second.",
+      "context": "",
+      "category": "reasoning",
+      "difficulty": "easy",
+      "metadata": {}
+    },
+    {
+      "id": "fact_001",
+      "query": "What is the capital of Australia?",
+      "ground_truth": "Canberra is the capital of Australia.",
+      "context": "",
+      "category": "factual",
+      "difficulty": "easy",
+      "metadata": {}
+    },
+    {
+      "id": "fact_002",
+      "query": "How many chromosomes do humans have?",
+      "ground_truth": "Humans have 46 chromosomes (23 pairs) in each cell, except for reproductive cells which have 23 chromosomes.",
+      "context": "",
+      "category": "factual",
+      "difficulty": "medium",
+      "metadata": {}
+    },
+    {
+      "id": "fact_003",
+      "query": "When was the United Nations founded?",
+      "ground_truth": "The United Nations was founded on October 24, 1945, after World War II.",
+      "context": "",
+      "category": "factual",
+      "difficulty": "medium",
+      "metadata": {}
+    }
+  ]
+}

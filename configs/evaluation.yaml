@@ -1,0 +1,76 @@
+# Evaluation Configuration
+
+# Metrics to track
+metrics:
+  effectiveness:
+    - accuracy
+    - relevance_score
+    - hallucination_rate
+    - context_utilization
+  
+  efficiency:
+    - latency_p50
+    - latency_p95
+    - latency_p99
+    - tokens_per_query
+    - cache_hit_rate
+    - cost_per_query
+  
+  scalability:
+    - throughput
+    - memory_usage
+    - index_size
+
+# Evaluation datasets
+datasets:
+  # Phase 0 baseline
+  baseline:
+    path: "./data/test_sets/baseline_qa.json"
+    size: 50
+  
+  # Phase 2+ RAG evaluation
+  rag:
+    path: "./data/test_sets/rag_qa.json"
+    size: 100
+  
+  # Multi-turn conversations (Phase 4)
+  conversation:
+    path: "./data/test_sets/conversation.json"
+    size: 30
+
+# Benchmark configuration
+benchmarking:
+  iterations: 3
+  warmup_iterations: 1
+  timeout_seconds: 60
+  parallel_requests: 1
+
+# Cost estimation (assuming local Ollama = free)
+cost_model:
+  ollama_local:
+    input_token_cost: 0.0
+    output_token_cost: 0.0
+  
+  # For future cloud model comparison
+  gpt4:
+    input_token_cost: 0.000003
+    output_token_cost: 0.000012
+  
+  claude_sonnet:
+    input_token_cost: 0.000003
+    output_token_cost: 0.000015
+
+# Paired Comparison Testing
+# Both techniques run on every test case for direct measurement of gains
+paired_comparison:
+  enabled: true
+  sample_size: 100
+  confidence_level: 0.95
+  randomize_order: true  # Randomize execution order to control for order effects
+  
+# Results storage
+results:
+  output_dir: "./docs/phase_summaries"
+  save_detailed_results: true
+  save_format: "json"
+

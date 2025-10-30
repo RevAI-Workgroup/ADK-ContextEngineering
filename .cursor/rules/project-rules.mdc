@@ -1,0 +1,751 @@
+---
+alwaysApply: true
+---
+## 💻 Coding Standards
+
+### Python Code Style
+
+```python
+"""Module docstring explaining purpose and usage."""
+
+from typing import List, Dict, Optional, Any
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+class ContextManager:
+    """
+    Manages context assembly and optimization for LLM calls.
+    
+    This class handles the dynamic construction of context windows,
+    including retrieval, compression, and filtering.
+    
+    Attributes:
+        max_tokens: Maximum token limit for context
+        compression_enabled: Whether to apply compression
+    """
+    
+    def __init__(self, max_tokens: int = 4096, compression_enabled: bool = True):
+        """
+        Initialize the ContextManager.
+        
+        Args:
+            max_tokens: Maximum tokens allowed in context
+            compression_enabled: Enable/disable compression
+        """
+        self.max_tokens = max_tokens
+        self.compression_enabled = compression_enabled
+        logger.info(f"Initialized ContextManager with max_tokens={max_tokens}")
+    
+    def assemble_context(
+        self, 
+        query: str, 
+        retrieved_docs: List[str],
+        conversation_history: Optional[List[Dict[str, str]]] = None
+    ) -> Dict[str, Any]:
+        """
+        Assemble optimized context for LLM.
+        
+        Args:
+            query: User's input query
+            retrieved_docs: Documents from RAG
+            conversation_history: Previous conversation turns
+            
+        Returns:
+            Dictionary containing assembled context and metrics
+            
+        Raises:
+            ValueError: If query is empty
+            ContextOverflowError: If context exceeds limits
+        """
+        if not query:
+            raise ValueError("Query cannot be empty")
+            
+        # Implementation here
+        pass
+```
+
+### Code Organization Principles
+
+1. **Single Responsibility**: Each module/class should have one clear purpose
+2. **Dependency Injection**: Pass dependencies as parameters, not hardcoded
+3. **Interface Abstraction**: Use abstract base classes for swappable components
+4. **Error Handling**: Always handle exceptions gracefully with logging
+5. **Configuration**: Use YAML/JSON files, not hardcoded values
+
+### Testing Requirements
+
+```python
+# tests/unit/test_context_manager.py
+import pytest
+from src.core.context_manager import ContextManager
+
+
+class TestContextManager:
+    """Test suite for ContextManager."""
+    
+    @pytest.fixture
+    def manager(self):
+        """Create a ContextManager instance for testing."""
+        return ContextManager(max_tokens=1024)
+    
+    def test_initialization(self, manager):
+        """Test proper initialization of ContextManager."""
+        assert manager.max_tokens == 1024
+        assert manager.compression_enabled is True
+    
+    def test_empty_query_raises_error(self, manager):
+        """Test that empty query raises ValueError."""
+        with pytest.raises(ValueError, match="Query cannot be empty"):
+            manager.assemble_context("", [])
+    
+    @pytest.mark.parametrize("query,expected", [
+        ("What is RAG?", True),
+        ("", False),
+    ])
+    def test_query_validation(self, manager, query, expected):
+        """Test query validation with multiple cases."""
+        # Test implementation
+        pass
+```
+
+---
+
+## 📊 Metrics Collection
+
+### How to Measure and Log Metrics
+
+```python
+from src.evaluation.metrics import MetricsCollector
+import time
+
+class RAGPipeline:
+    def __init__(self):
+        self.metrics = MetricsCollector()
+    
+    def retrieve_and_generate(self, query: str) -> str:
+        # Measure latency
+        start_time = time.time()
+        
+        # Perform retrieval
+        retrieved_docs = self.retrieve(query)
+        retrieval_time = time.time() - start_time
+        
+        # Measure tokens
+        input_tokens = self.count_tokens(query, retrieved_docs)
+        
+        # Generate response
+        response = self.generate(query, retrieved_docs)
+        total_time = time.time() - start_time
+        
+        # Log metrics
+        self.metrics.log({
+            'phase': 'phase_2_rag',
+            'query': query,
+            'retrieval_time_ms': retrieval_time * 1000,
+            'total_time_ms': total_time * 1000,
+            'input_tokens': input_tokens,
+            'retrieved_doc_count': len(retrieved_docs),
+            'response_length': len(response)
+        })
+        
+        return response
+```
+
+### Metrics to Track at Each Phase
+
+- **Phase 0**: Baseline response time, token usage, cost
+- **Phase 1**: Tool calling success rate, agent reasoning quality
+- **Phase 2**: Retrieval precision/recall, RAG impact on accuracy
+- **Phase 3**: Reranking effectiveness, hybrid search improvements
+- **Phase 4**: Cache hit rate, memory coherence score
+- **Phase 5**: Compression ratio, quality preservation
+- **Phase 6**: Graph traversal efficiency, routing accuracy
+
+---
+
+## 🔄 Development Workflow
+
+### 1. Task Selection
+```bash
+# Check current progress
+grep -n "\[ \]" BACKLOG.md | head -10  # Show next 10 uncompleted tasks
+
+# Select a task and create a feature branch
+git checkout -b feature/phase-2-vector-db-setup
+```
+
+### 2. Implementation Process
+
+1. **Read relevant context files**
+2. **Review existing code in the module**
+3. **Write tests first (TDD approach)**
+4. **Implement the feature**
+5. **Run tests and benchmarks**
+6. **Update documentation**
+7. **Update BACKLOG.md task status**
+
+### 3. Code Review Checklist
+
+Before marking a task complete, ensure:
+
+- [ ] All tests pass (`pytest tests/`)
+- [ ] Code follows style guidelines
+- [ ] Documentation is updated
+- [ ] Metrics are being collected
+- [ ] No hardcoded values (use config files)
+- [ ] Error handling is comprehensive
+- [ ] Logging is appropriate
+- [ ] Performance benchmarks are recorded
+
+### 4. Commit Message Format
+
+```
+feat(phase-2): implement vector database interface
+
+- Add ChromaDB initialization and configuration
+- Create collection management methods
+- Implement embedding storage and retrieval
+- Add persistence configuration
+
+Metrics: Embedding storage takes ~0.5ms per document
+Tests: 15 passing, 100% coverage for vector_store.py
+```
+
+---
+
+## 🏗️ Architecture Guidelines
+
+### Component Design
+
+Each major component should follow this structure:
+
+```python
+# src/retrieval/vector_store.py
+
+from abc import ABC, abstractmethod
+from typing import List, Dict, Any
+
+class VectorStore(ABC):
+    """Abstract base class for vector stores."""
+    
+    @abstractmethod
+    def add_documents(self, documents: List[Dict[str, Any]]) -> None:
+        """Add documents to the store."""
+        pass
+    
+    @abstractmethod
+    def search(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
+        """Search for similar documents."""
+        pass
+
+
+class ChromaVectorStore(VectorStore):
+    """ChromaDB implementation of VectorStore."""
+    
+    def __init__(self, collection_name: str, persist_directory: str):
+        # Implementation
+        pass
+```
+
+### Configuration Management
+
+```yaml
+# configs/retrieval.yaml
+retrieval:
+  vector_store:
+    type: "chroma"
+    collection_name: "context_engineering"
+    persist_directory: "./data/chroma"
+  
+  embeddings:
+    model: "sentence-transformers/all-MiniLM-L6-v2"
+    dimension: 384
+    batch_size: 32
+  
+  search:
+    top_k: 10
+    similarity_threshold: 0.7
+```
+
+### Dependency Injection
+
+```python
+# src/core/adk_agent.py
+
+class ADKAgent:
+    def __init__(
+        self,
+        llm_client: LLMClient,
+        context_manager: ContextManager,
+        vector_store: VectorStore,
+        config: Dict[str, Any]
+    ):
+        self.llm = llm_client
+        self.context_manager = context_manager
+        self.vector_store = vector_store
+        self.config = config
+```
+
+---
+
+## 📈 Benchmark Implementation
+
+### Creating Benchmarks
+
+```python
+# scripts/run_evaluation.py
+
+from src.evaluation.evaluator import Evaluator
+from src.evaluation.benchmarks import BenchmarkDataset
+
+def run_phase_benchmark(phase_name: str):
+    """Run benchmarks for a specific phase."""
+    
+    # Load benchmark dataset
+    dataset = BenchmarkDataset.load(f"data/test_sets/{phase_name}.json")
+    
+    # Initialize evaluator
+    evaluator = Evaluator(
+        metrics=['accuracy', 'latency', 'token_usage', 'cost']
+    )
+    
+    # Run evaluation
+    results = evaluator.evaluate(
+        dataset=dataset,
+        system=get_current_system(),
+        phase=phase_name
+    )
+    
+    # Save results
+    results.save(f"docs/phase_summaries/{phase_name}_metrics.json")
+    
+    # Generate comparison with previous phases
+    comparison = evaluator.compare_with_baseline(results)
+    print(comparison.summary())
+    
+    return results
+```
+
+### A/B Testing Framework
+
+```python
+# src/evaluation/ab_testing.py
+
+class ABTest:
+    """Framework for comparing two techniques."""
+    
+    def __init__(self, technique_a: Any, technique_b: Any):
+        self.technique_a = technique_a
+        self.technique_b = technique_b
+        self.results = {'a': [], 'b': []}
+    
+    def run_test(self, test_cases: List[str], iterations: int = 100):
+        """Run A/B test on provided test cases."""
+        for test_case in test_cases:
+            for _ in range(iterations):
+                # Randomly assign to A or B
+                if random.random() < 0.5:
+                    result = self.technique_a.process(test_case)
+                    self.results['a'].append(result)
+                else:
+                    result = self.technique_b.process(test_case)
+                    self.results['b'].append(result)
+        
+        return self.analyze_results()
+```
+
+---
+
+## 🐛 Debugging Guidelines
+
+### Logging Best Practices
+
+```python
+import logging
+import json
+
+# Configure structured logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+
+class ContextManager:
+    def __init__(self):
+        self.logger = logging.getLogger(self.__class__.__name__)
+    
+    def process_query(self, query: str):
+        self.logger.info(f"Processing query", extra={
+            'query_length': len(query),
+            'query_preview': query[:50]
+        })
+        
+        try:
+            result = self._internal_process(query)
+            self.logger.info("Query processed successfully", extra={
+                'result_tokens': result['token_count'],
+                'processing_time': result['time_ms']
+            })
+        except Exception as e:
+            self.logger.error(f"Query processing failed", extra={
+                'error': str(e),
+                'query': query
+            }, exc_info=True)
+            raise
+```
+
+### Common Issues and Solutions
+
+1. **Context Overflow**
+   - Check token counting implementation
+   - Verify compression is working
+   - Review chunk sizes
+
+2. **Slow Retrieval**
+   - Check vector database indexing
+   - Verify embedding caching
+   - Profile the retrieval pipeline
+
+3. **Poor Relevance**
+   - Review chunking strategy
+   - Check embedding model quality
+   - Verify reranking configuration
+
+---
+
+## 📝 Documentation Standards
+
+### Code Documentation
+
+Every module should have:
+1. Module-level docstring
+2. Class-level docstrings
+3. Method/function docstrings with Args, Returns, Raises
+4. Inline comments for complex logic
+
+### Phase Summary Template
+
+```markdown
+# Phase X: [Phase Name] - Summary
+
+## Objectives
+- What we set out to achieve
+
+## Implementation
+- Key components built
+- Technologies used
+- Challenges encountered
+
+## Metrics Improvement
+| Metric | Previous | Current | Change |
+|--------|----------|---------|--------|
+| Latency | X ms | Y ms | -Z% |
+
+## Key Findings
+- Discovery 1
+- Discovery 2
+
+## Recommendations
+- Best configuration discovered
+- Suggested improvements
+
+## Next Steps
+- What Phase X+1 will address
+```
+
+---
+
+## 🚀 Advanced Techniques Implementation
+
+### Graph RAG Guidelines
+
+```python
+# src/advanced/graph_rag.py
+
+class GraphRAG:
+    """
+    Implement knowledge graph-based retrieval.
+    
+    Key considerations:
+    - Entity extraction accuracy
+    - Relationship mapping
+    - Graph traversal efficiency
+    - Hybrid graph-vector search
+    """
+    
+    def build_knowledge_graph(self, documents: List[str]):
+        """
+        Build graph from documents.
+        
+        Steps:
+        1. Extract entities using NER
+        2. Identify relationships
+        3. Create graph structure
+        4. Index for fast traversal
+        """
+        pass
+```
+
+### Adaptive Chunking Implementation
+
+```python
+# src/advanced/adaptive_chunking.py
+
+class AdaptiveChunker:
+    """
+    Dynamically determine optimal chunk sizes.
+    
+    Strategies:
+    - Semantic coherence scoring
+    - Topic modeling for boundaries
+    - Structure-aware splitting
+    - Query-dependent sizing
+    """
+    
+    def chunk_document(self, document: str, query_context: str = None):
+        """
+        Create chunks with dynamic sizing.
+        
+        Consider:
+        - Document structure (headings, paragraphs)
+        - Semantic similarity within chunks
+        - Information density
+        - Query relevance (if provided)
+        """
+        pass
+```
+
+---
+
+## ⚡ Performance Optimization
+
+### Profiling Code
+
+```python
+import cProfile
+import pstats
+from functools import wraps
+
+def profile_performance(func):
+    """Decorator to profile function performance."""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        profiler = cProfile.Profile()
+        profiler.enable()
+        result = func(*args, **kwargs)
+        profiler.disable()
+        
+        stats = pstats.Stats(profiler)
+        stats.sort_stats('cumulative')
+        stats.print_stats(10)  # Top 10 time-consuming operations
+        
+        return result
+    return wrapper
+
+@profile_performance
+def expensive_operation():
+    # Code to profile
+    pass
+```
+
+### Optimization Checklist
+
+- [ ] Use batch processing where possible
+- [ ] Implement caching for repeated operations
+- [ ] Parallelize independent operations
+- [ ] Use generators for large datasets
+- [ ] Profile before optimizing
+- [ ] Measure impact of optimizations
+
+---
+
+## 🔐 Security Considerations
+
+### Input Validation
+
+```python
+from pydantic import BaseModel, validator
+
+class QueryRequest(BaseModel):
+    query: str
+    max_tokens: int = 1000
+    
+    @validator('query')
+    def validate_query(cls, v):
+        if not v or len(v.strip()) == 0:
+            raise ValueError("Query cannot be empty")
+        if len(v) > 10000:
+            raise ValueError("Query too long")
+        return v.strip()
+    
+    @validator('max_tokens')
+    def validate_max_tokens(cls, v):
+        if v < 1 or v > 100000:
+            raise ValueError("max_tokens must be between 1 and 100000")
+        return v
+```
+
+### Safe File Operations
+
+```python
+import os
+from pathlib import Path
+
+def safe_file_read(filepath: str, allowed_dirs: List[str]) -> str:
+    """Safely read file with path validation."""
+    path = Path(filepath).resolve()
+    
+    # Check if path is within allowed directories
+    if not any(path.is_relative_to(Path(d).resolve()) for d in allowed_dirs):
+        raise ValueError(f"Access denied: {filepath}")
+    
+    if not path.exists():
+        raise FileNotFoundError(f"File not found: {filepath}")
+    
+    if not path.is_file():
+        raise ValueError(f"Not a file: {filepath}")
+    
+    return path.read_text()
+```
+
+---
+
+## 📚 Learning Resources
+
+### Context Engineering Papers
+- "Lost in the Middle: How Language Models Use Long Contexts"
+- "Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks"
+- "Dense Passage Retrieval for Open-Domain Question Answering"
+
+### Useful Libraries
+- `langchain` - For RAG pipelines and chains
+- `sentence-transformers` - For embeddings
+- `chromadb` - Vector database
+- `fastapi` - API framework
+- `pydantic` - Data validation
+
+### Debugging Tools
+- `pdb` - Python debugger
+- `memory_profiler` - Memory usage analysis
+- `line_profiler` - Line-by-line profiling
+- `pytest-benchmark` - Benchmark testing
+
+---
+
+## 🎯 Phase-Specific Guidelines
+
+### Phase 0: Foundation
+- Focus on setting up robust evaluation framework
+- Ensure metrics collection is working correctly
+- Create comprehensive baseline measurements
+
+### Phase 1: ADK Agent
+- Study ADK documentation thoroughly
+- Implement comprehensive error handling
+- Ensure tool calling is reliable
+
+### Phase 2: Basic RAG
+- Start with simple chunking strategies
+- Focus on retrieval quality over speed initially
+- Measure retrieval relevance carefully
+
+### Phase 3: Advanced Retrieval
+- Compare each technique against baseline
+- Document optimal configurations
+- Focus on measurable improvements
+
+### Phase 4: Memory & Caching
+- Design cache key strategy carefully
+- Monitor cache effectiveness
+- Ensure conversation coherence
+
+### Phase 5: Compression
+- Preserve information quality
+- Measure compression ratios
+- Test edge cases thoroughly
+
+### Phase 6: Advanced Techniques
+- Implement incrementally
+- Compare against simpler approaches
+- Document complexity vs. benefit tradeoffs
+
+---
+
+## 💡 Best Practices Summary
+
+1. **Always measure before and after changes**
+2. **Document design decisions and rationale**
+3. **Write tests before implementation**
+4. **Use configuration files, not hardcoded values**
+5. **Log important operations and metrics**
+6. **Handle errors gracefully**
+7. **Optimize only after profiling**
+8. **Keep code modular and testable**
+9. **Update documentation continuously**
+10. **Review AI-generated code carefully**
+
+---
+
+## 🔧 Troubleshooting
+
+### When Things Go Wrong
+
+1. **Check the logs first**
+   ```bash
+   tail -f logs/application.log
+   grep ERROR logs/application.log
+   ```
+
+2. **Verify configuration**
+   ```python
+   from src.core.config import Config
+   config = Config.load()
+   print(config.to_dict())
+   ```
+
+3. **Run specific tests**
+   ```bash
+   pytest tests/unit/test_specific_module.py -v
+   pytest -k "test_specific_function" -v
+   ```
+
+4. **Check dependencies**
+   ```bash
+   pip list | grep package_name
+   pip install -r requirements.txt --upgrade
+   ```
+
+5. **Profile performance issues**
+   ```python
+   python -m cProfile -s cumulative scripts/problematic_script.py
+   ```
+
+---
+
+## 📅 Session Checklist
+
+### Before Starting Work
+- [ ] Pull latest changes from repository
+- [ ] Read current phase status in BACKLOG.md
+- [ ] Review .context/ files for updates
+- [ ] Check if dependencies need updating
+- [ ] Understand current metrics baseline
+
+### During Development
+- [ ] Follow coding standards
+- [ ] Write comprehensive tests
+- [ ] Document as you code
+- [ ] Collect relevant metrics
+- [ ] Commit frequently with clear messages
+
+### Before Ending Session
+- [ ] Run all tests
+- [ ] Update BACKLOG.md task status
+- [ ] Document any design decisions
+- [ ] Update .context/current_phase.md if needed
+- [ ] Push changes to repository
+- [ ] Leave notes for next session
+
+---

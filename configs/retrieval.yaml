@@ -1,0 +1,57 @@
+# Retrieval Configuration
+
+vector_store:
+  type: "chroma"
+  collection_name: "context_engineering"
+  persist_directory: "./data/chroma"
+  
+  # ChromaDB specific settings
+  chroma:
+    anonymized_telemetry: false
+    allow_reset: true
+
+# Chunking strategies
+chunking:
+  # Phase 2: Basic fixed-size chunking
+  fixed_size:
+    chunk_size: 512
+    chunk_overlap: 50
+    separator: "\n\n"
+  
+  # Phase 3: Advanced chunking strategies
+  semantic:
+    enabled: false
+    min_chunk_size: 256
+    max_chunk_size: 1024
+  
+  markdown_aware:
+    enabled: false
+    respect_headers: true
+
+# Search configuration
+search:
+  # Basic vector search (Phase 2)
+  vector:
+    top_k: 10
+    similarity_threshold: 0.0
+  
+  # Hybrid search (Phase 3)
+  hybrid:
+    enabled: false
+    vector_weight: 0.7
+    bm25_weight: 0.3
+    top_k: 20
+  
+  # Reranking (Phase 3)
+  reranking:
+    enabled: false
+    rerank_top_k: 5
+    
+# Query enhancement (Phase 3)
+query_enhancement:
+  enabled: false
+  techniques:
+    query_expansion: false
+    hyde: false  # Hypothetical Document Embeddings
+    multi_query: false
+
