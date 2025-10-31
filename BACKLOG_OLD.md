@@ -15,75 +15,7 @@ context-engineering-sandbox/
 ├── .github/
 │   └── workflows/
 │       └── ci.yml                  # Continuous integration
-├── frontend/                       # Phase 1.5: React Web UI
-│   ├── public/                     # Static assets
-│   │   ├── vite.svg
-│   │   └── favicon.ico
-│   ├── src/
-│   │   ├── components/             # React components
-│   │   │   ├── ui/                 # Shadcn/UI components
-│   │   │   │   ├── button.tsx
-│   │   │   │   ├── card.tsx
-│   │   │   │   ├── input.tsx
-│   │   │   │   ├── dialog.tsx
-│   │   │   │   ├── tabs.tsx
-│   │   │   │   ├── accordion.tsx
-│   │   │   │   └── ...             # Other Shadcn components
-│   │   │   ├── chat/               # AG-UI chat components
-│   │   │   │   ├── ChatInterface.tsx
-│   │   │   │   ├── ChatMessage.tsx
-│   │   │   │   ├── ChatInput.tsx
-│   │   │   │   ├── ThinkingDisplay.tsx
-│   │   │   │   └── ToolOutputDisplay.tsx
-│   │   │   ├── metrics/            # Metrics display components
-│   │   │   │   ├── MetricsCard.tsx
-│   │   │   │   ├── MetricsGrid.tsx
-│   │   │   │   └── MetricsChart.tsx
-│   │   │   ├── layout/             # Layout components
-│   │   │   │   ├── Header.tsx
-│   │   │   │   ├── Sidebar.tsx
-│   │   │   │   └── Footer.tsx
-│   │   │   └── common/             # Shared components
-│   │   │       ├── ErrorBoundary.tsx
-│   │   │       ├── LoadingSpinner.tsx
-│   │   │       └── ErrorMessage.tsx
-│   │   ├── pages/                  # Page components
-│   │   │   ├── Home.tsx            # Landing page
-│   │   │   ├── Chat.tsx            # Chat interface page
-│   │   │   ├── Metrics.tsx         # Metrics dashboard
-│   │   │   └── NotFound.tsx        # 404 page
-│   │   ├── hooks/                  # Custom React hooks
-│   │   │   ├── useAgent.ts         # Agent interaction hook
-│   │   │   ├── useMetrics.ts       # Metrics fetching hook
-│   │   │   └── useWebSocket.ts     # WebSocket connection hook
-│   │   ├── services/               # API services
-│   │   │   ├── agentService.ts     # Agent API calls
-│   │   │   ├── metricsService.ts   # Metrics API calls
-│   │   │   └── api.ts              # Base API configuration
-│   │   ├── types/                  # TypeScript type definitions
-│   │   │   ├── agent.types.ts
-│   │   │   ├── message.types.ts
-│   │   │   └── metrics.types.ts
-│   │   ├── utils/                  # Utility functions
-│   │   │   ├── formatters.ts       # Data formatters
-│   │   │   └── validators.ts       # Input validators
-│   │   ├── styles/                 # Global styles
-│   │   │   └── globals.css         # Global CSS + Tailwind
-│   │   ├── App.tsx                 # Root component
-│   │   ├── main.tsx                # Entry point
-│   │   └── vite-env.d.ts           # Vite type definitions
-│   ├── .env.example                # Frontend environment variables
-│   ├── .eslintrc.cjs               # ESLint configuration
-│   ├── .prettierrc                 # Prettier configuration
-│   ├── components.json             # Shadcn/UI configuration
-│   ├── index.html                  # HTML entry point
-│   ├── package.json                # Frontend dependencies
-│   ├── postcss.config.js           # PostCSS configuration
-│   ├── tailwind.config.js          # Tailwind CSS configuration
-│   ├── tsconfig.json               # TypeScript configuration
-│   ├── tsconfig.node.json          # TypeScript node config
-│   └── vite.config.ts              # Vite build configuration
-├── src/                            # Backend Python source
+├── src/
 │   ├── core/
 │   │   ├── __init__.py
 │   │   ├── adk_agent.py           # Base ADK agent implementation
@@ -120,9 +52,6 @@ context-engineering-sandbox/
 │       ├── __init__.py
 │       ├── main.py               # FastAPI application
 │       └── endpoints.py          # API endpoints
-├── context_engineering_agent/      # ADK agent directory
-│   ├── __init__.py
-│   └── agent.py                    # ADK agent definition
 ├── tests/
 │   ├── unit/
 │   ├── integration/
@@ -147,9 +76,8 @@ context-engineering-sandbox/
 ├── notebooks/
 │   └── experiments/            # Jupyter notebooks for experimentation
 ├── docker/
-│   ├── Dockerfile              # Backend Docker image
-│   ├── Dockerfile.frontend     # Frontend Docker image
-│   └── docker-compose.yml      # Multi-container orchestration
+│   ├── Dockerfile
+│   └── docker-compose.yml
 ├── .context/                    # AI assistant context files
 │   ├── project_overview.md
 │   ├── current_phase.md
@@ -280,59 +208,6 @@ context-engineering-sandbox/
 - [x] Document lessons learned (included in phase summary)
 - [x] Update BACKLOG.md with completion status
 - [ ] Measure baseline metrics comparison (DEFERRED: Will do full evaluation in Phase 2 with RAG for meaningful comparison)
-
----
-
-## Phase 1.5: Web UI Development
-**Objective**: Develop a frontend web UI to interact with the ADK agent backend, providing a user-friendly interface for querying the agent, viewing responses, and displaying basic metrics. This phase introduces visual interaction before advancing to RAG, using AG-UI for agent chat components.
-
-**Key Technologies**: React (base framework), Shadcn/UI (for beautiful, reusable components like chat interfaces, built on Tailwind CSS), AG-UI (for agent-user chat protocols), Tailwind CSS (styling foundation), Axios (API requests), React Router (navigation), and AG-Grid (for data tables if needed).
-
-### Frontend Setup
-- [ ] Initialize frontend project with Vite + React + TypeScript
-- [ ] Install core dependencies: react, react-dom, @radix-ui/react-* (or similar primitives), tailwindcss, axios, react-router-dom, ag-grid-react; then initialize Shadcn via CLI (npx shadcn@latest init) and add components as needed (e.g., npx shadcn@latest add button dialog input)
-- [ ] Configure build tools: Vite for bundling, Tailwind for CSS, ESLint/Prettier for code quality
-- [ ] Set up environment variables for backend API URL (e.g., linking to ADK's `adk web` server)
-- [ ] Create basic project structure (src/components, src/pages, etc.)
-
-### UI Components Implementation
-- [ ] Build chat interface using AG-UI components (e.g., message rendering, input handling, agent response streaming)
-- [ ] Implement agent query submission: Send requests to ADK backend endpoints (e.g., /chat or tool calls)
-- [ ] Display agent responses, including thinking steps (<think> blocks) and tool outputs, styled with Shadcn's components for better readability (e.g., using Tabs or Accordion for multi-part responses).
-- [ ] Add navigation: Home page with overview, Chat page for interactions, Metrics page for displaying evaluation results
-- [ ] Integrate data visualization: Use AG-Grid for tabular display of metrics (e.g., accuracy, latency) from backend API
-- [ ] Add error handling and loading states for API interactions
-- [ ] Use Shadcn components for core UI elements: e.g., ChatMessage for rendering agent responses, Input for query submission, Card/Accordion for displaying thinking steps or metrics, ensuring a visually appealing and responsive design.
-
-### Backend Integration
-- [ ] Ensure ADK backend exposes necessary APIs (leverage `adk web` or add minimal FastAPI wrappers if needed for custom endpoints)
-- [ ] Implement authentication if required (e.g., API keys for secure access)
-- [ ] Test end-to-end: Query agent via UI, verify responses match direct ADK runs
-- [ ] Handle real-time updates: Support WebSockets or polling for streaming responses if ADK supports it
-
-### Testing & Evaluation
-- [ ] Write unit tests for components (using Jest + React Testing Library)
-- [ ] Create integration tests for API interactions (e.g., mock backend responses)
-- [ ] Perform manual UI testing: Chat flows, metric displays, responsiveness on mobile/desktop
-- [ ] Measure UI performance: Page load times, interaction latency
-- [ ] Document UI usage in README.md and docs/api.md
-- [ ] Ensure UI accessibility and theming: Test Shadcn's dark mode and responsiveness across devices.
-
-### Deployment Considerations
-- [ ] Configure Docker for frontend (separate container, or compose with backend)
-- [ ] Update docker-compose.yml to include frontend service
-- [ ] Add build scripts for production deployment (e.g., vite build)
-
-### Phase 1.5 Summary
-- [ ] Write phase summary document (docs/phase_summaries/phase1_5_summary.md)
-- [ ] Document lessons learned (e.g., AG-UI integration challenges)
-- [ ] Update BACKLOG.md with completion status
-- [ ] Compare UI-enhanced interactions vs. CLI (e.g., user experience qualitative notes)
-
-### 2025-10-31 - Phase 1.5 Updated for Shadcn ✅
-- 📝 Incorporated Shadcn/UI for enhanced components on top of Tailwind, improving aesthetics and ease of development.
-- 🎯 UI now leverages Shadcn for eye-catching designs while keeping customization via Tailwind.
-- 🚀 Ready to proceed with implementation.
 
 ---
 
