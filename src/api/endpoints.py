@@ -1,0 +1,319 @@
+"""
+API endpoint handlers for chat, metrics, and tools.
+"""
+
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Depends, Request
+from pydantic import BaseModel, Field
+from typing import List, Dict, Any, Optional
+import json
+import logging
+from datetime import datetime, timezone
+
+from src.api.adk_wrapper import ADKAgentWrapper
+from src.evaluation.metrics import MetricsCollector
+
+logger = logging.getLogger(__name__)
+
+# Initialize routers
+chat_router = APIRouter()
+metrics_router = APIRouter()
+tools_router = APIRouter()
+
+
+# ============================================================================
+# DEPENDENCY PROVIDERS
+# ============================================================================
+
+def get_adk_wrapper(request: Request) -> ADKAgentWrapper:
+    """
+    Dependency provider for ADK Agent Wrapper.
+    
+    Returns the singleton instance from app state.
+    """
+    return request.app.state.adk_wrapper
+
+
+def get_metrics_collector(request: Request) -> MetricsCollector:
+    """
+    Dependency provider for Metrics Collector.
+    
+    Returns the singleton instance from app state.
+    """
+    return request.app.state.metrics_collector
+
+
+# Pydantic models
+class ChatMessage(BaseModel):
+    """Chat message from user."""
+    message: str = Field(..., description="User's message to the agent")
+    session_id: Optional[str] = Field(None, description="Session ID for conversation tracking")
+    include_thinking: bool = Field(True, description="Include agent thinking process in response")
+
+
+class ChatResponse(BaseModel):
+    """Response from agent."""
+    response: str = Field(..., description="Agent's response")
+    thinking_steps: Optional[List[str]] = Field(None, description="Agent's thinking process")
+    tool_calls: Optional[List[Dict[str, Any]]] = Field(None, description="Tools called by agent")
+    metrics: Optional[Dict[str, Any]] = Field(None, description="Response metrics")
+    timestamp: str = Field(..., description="Response timestamp")
+
+
+class ToolInfo(BaseModel):
+    """Information about a tool."""
+    name: str
+    description: str
+    parameters: Dict[str, Any]
+
+
+# ============================================================================
+# CHAT ENDPOINTS
+# ============================================================================
+
+@chat_router.post("/chat", response_model=ChatResponse)
+async def chat(
+    message: ChatMessage,
+    adk_wrapper: ADKAgentWrapper = Depends(get_adk_wrapper),
+    metrics_collector: MetricsCollector = Depends(get_metrics_collector)
+):
+    """
+    Send a message to the ADK agent and get a response.
+    
+    This endpoint provides synchronous chat interaction.
+    For real-time streaming, use the WebSocket endpoint /api/chat/ws
+    """
+    logger.info(f"Received chat message: {message.message[:50]}...")
+    
+    try:
+        # Process message through ADK agent
+        result = await adk_wrapper.process_message(
+            message=message.message,
+            session_id=message.session_id,
+            include_thinking=message.include_thinking
+        )
+        
+        # Collect metrics
+        metrics = metrics_collector.collect_response_metrics(result)
+        
+        return ChatResponse(
+            response=result.get("response", ""),
+            thinking_steps=result.get("thinking_steps"),
+            tool_calls=result.get("tool_calls"),
+            metrics=metrics,
+            timestamp=datetime.now(timezone.utc).isoformat()
+        )
+        
+    except Exception as e:
+        logger.error(f"Error processing chat message: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@chat_router.websocket("/chat/ws")
+async def chat_websocket(websocket: WebSocket):
+    """
+    WebSocket endpoint for real-time agent interaction.
+    
+    Streams agent thinking, tool calls, and responses in real-time.
+    
+    Message format (client -> server):
+    {
+        "type": "message",
+        "message": "user's message",
+        "session_id": "optional-session-id"
+    }
+    
+    Message format (server -> client):
+    {
+        "type": "thinking" | "tool_call" | "response" | "complete" | "error",
+        "data": { ... },
+        "timestamp": "ISO-8601 timestamp"
+    }
+    """
+    await websocket.accept()
+    logger.info("WebSocket connection established")
+    
+    # Get dependencies from app state
+    adk_wrapper = websocket.app.state.adk_wrapper
+    
+    try:
+        while True:
+            # Receive message from client
+            data = await websocket.receive_text()
+            
+            # Parse JSON with error handling
+            try:
+                message_data = json.loads(data)
+            except json.JSONDecodeError as e:
+                logger.error(f"JSON decode error: {e}. Raw data: {data[:200]}")
+                await websocket.send_json({
+                    "type": "error",
+                    "data": {"error": f"Invalid JSON: {str(e)}"},
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                })
+                continue
+            
+            logger.info(f"WebSocket received: {message_data.get('message', '')[:50]}...")
+            
+            # Validate message
+            if message_data.get("type") != "message":
+                await websocket.send_json({
+                    "type": "error",
+                    "data": {"error": "Invalid message type"},
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                })
+                continue
+            
+            # Process message with streaming
+            async for event in adk_wrapper.process_message_stream(
+                message=message_data["message"],
+                session_id=message_data.get("session_id")
+            ):
+                await websocket.send_json({
+                    "type": event["type"],
+                    "data": event["data"],
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                })
+            
+            # Send completion signal
+            await websocket.send_json({
+                "type": "complete",
+                "data": {},
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            })
+            
+    except WebSocketDisconnect:
+        logger.info("WebSocket disconnected")
+    except Exception as e:
+        logger.error(f"WebSocket error: {e}", exc_info=True)
+        try:
+            await websocket.send_json({
+                "type": "error",
+                "data": {"error": str(e)},
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            })
+        except Exception as send_error:
+            logger.debug(f"Failed to send error message to WebSocket: {send_error}")
+
+
+# ============================================================================
+# METRICS ENDPOINTS
+# ============================================================================
+
+@metrics_router.get("/metrics")
+async def get_metrics(
+    metrics_collector: MetricsCollector = Depends(get_metrics_collector)
+):
+    """
+    Get all collected metrics.
+    
+    Returns metrics from all phases, including:
+    - Baseline metrics (Phase 0)
+    - Agent metrics (Phase 1)
+    - RAG metrics (Phase 2+)
+    - Context engineering metrics
+    """
+    try:
+        metrics = metrics_collector.get_all_metrics()
+        return {
+            "metrics": metrics,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error fetching metrics: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@metrics_router.get("/metrics/phase/{phase_id}")
+async def get_phase_metrics(
+    phase_id: str,
+    metrics_collector: MetricsCollector = Depends(get_metrics_collector)
+):
+    """
+    Get metrics for a specific phase.
+    
+    Args:
+        phase_id: Phase identifier (e.g., "phase0", "phase1", "phase2")
+    """
+    try:
+        metrics = metrics_collector.get_phase_metrics(phase_id)
+        if metrics is None:
+            raise HTTPException(status_code=404, detail=f"No metrics found for {phase_id}")
+        
+        return {
+            "phase": phase_id,
+            "metrics": metrics,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching phase metrics: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@metrics_router.get("/metrics/comparison")
+async def get_metrics_comparison(
+    metrics_collector: MetricsCollector = Depends(get_metrics_collector)
+):
+    """
+    Get a comparison of metrics across all phases.
+    
+    Returns a structured comparison showing improvements/degradations
+    in key metrics across phases.
+    """
+    try:
+        comparison = metrics_collector.get_metrics_comparison()
+        return {
+            "comparison": comparison,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error generating metrics comparison: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# TOOLS ENDPOINTS
+# ============================================================================
+
+@tools_router.get("/tools", response_model=List[ToolInfo])
+async def get_tools(
+    adk_wrapper: ADKAgentWrapper = Depends(get_adk_wrapper)
+):
+    """
+    Get list of available tools for the ADK agent.
+    
+    Returns information about each tool including name, description,
+    and parameters.
+    """
+    try:
+        tools = adk_wrapper.get_available_tools()
+        return tools
+    except Exception as e:
+        logger.error(f"Error fetching tools: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@tools_router.get("/tools/{tool_name}")
+async def get_tool_info(
+    tool_name: str,
+    adk_wrapper: ADKAgentWrapper = Depends(get_adk_wrapper)
+):
+    """
+    Get detailed information about a specific tool.
+    
+    Args:
+        tool_name: Name of the tool
+    """
+    try:
+        tool_info = adk_wrapper.get_tool_info(tool_name)
+        if not tool_info:
+            raise HTTPException(status_code=404, detail=f"Tool '{tool_name}' not found")
+        
+        return tool_info
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching tool info: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
