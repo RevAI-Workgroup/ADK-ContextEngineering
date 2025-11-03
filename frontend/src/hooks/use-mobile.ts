@@ -9,12 +9,25 @@ export function useIsMobile() {
     if (typeof window === 'undefined') return
 
     const mql = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`)
-    const onChange = () => {
-      setIsMobile(window.innerWidth < MOBILE_BREAKPOINT)
+    const handleChange = (event: MediaQueryListEvent | MediaQueryList) => {
+      setIsMobile(event.matches)
     }
-    mql.addEventListener("change", onChange)
-    setIsMobile(window.innerWidth < MOBILE_BREAKPOINT)
-    return () => mql.removeEventListener("change", onChange)
+
+    if (typeof mql.addEventListener === "function") {
+      mql.addEventListener("change", handleChange)
+    } else {
+      mql.addListener(handleChange)
+    }
+
+    setIsMobile(mql.matches)
+
+    return () => {
+      if (typeof mql.removeEventListener === "function") {
+        mql.removeEventListener("change", handleChange)
+      } else {
+        mql.removeListener(handleChange)
+      }
+    }
   }, [])
 
   return !!isMobile
