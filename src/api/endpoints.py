@@ -163,8 +163,10 @@ async def chat_websocket(websocket: WebSocket):
                 })
                 continue
             
-            logger.info(f"WebSocket received: {message_data.get('message', '')[:50]}...")
-            
+            logger.debug(
+                "WebSocket received message for session %s",
+                message_data.get("session_id", "<unknown>"),
+            )
             # Validate message
             if message_data.get("type") != "message":
                 await websocket.send_json({
