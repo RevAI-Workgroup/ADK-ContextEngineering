@@ -112,7 +112,7 @@ async def chat(
             tool_calls=result.get("tool_calls"),
             metrics=metrics,
             timestamp=datetime.now(timezone.utc).isoformat(),
-            model=message.model  # Include the model used in the response
+            model=result.get("model", message.model),
         )
         
     except Exception as e:
