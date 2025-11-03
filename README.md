@@ -4,10 +4,12 @@
 
 ## 📋 Project Overview
 
-This project implements a comprehensive exploration of context engineering through 7 progressive phases, measuring the impact of each technique on:
+This project is a **modular experimentation platform** for context engineering techniques. Instead of linear phase progression, it enables dynamic comparison of different configurations through a toggleable architecture, measuring the impact of each technique on:
 - **Effectiveness**: Answer accuracy, relevance, hallucination rate
 - **Efficiency**: Latency, token usage, cost
 - **Scalability**: Throughput, memory usage
+
+**Key Innovation**: Run the same query with different context engineering techniques enabled/disabled, then compare results side-by-side to measure real impact.
 
 ## 🚀 Technology Stack
 
@@ -50,12 +52,14 @@ This project implements a comprehensive exploration of context engineering throu
 - ✅ **Phase 0**: Foundation & Benchmarking (Complete)
 - ✅ **Phase 1**: MVP Agent with Google ADK (Complete)
 - ✅ **Phase 1.5**: Web UI Development (Complete)
-- ⏳ **Phase 2**: Basic RAG Implementation (Next - Context Engineering Begins!)
-- ⏳ **Phase 3**: Advanced Retrieval Techniques
-- ⏳ **Phase 4**: Memory & State Management
-- ⏳ **Phase 5**: Context Compression & Optimization
-- ⏳ **Phase 6**: Advanced Context Engineering
+- ⏳ **Phase 2**: Modular Platform Infrastructure (Next - Build toggleable architecture!)
+- ⏳ **Phase 3**: RAG Module (First technique: vector retrieval)
+- ⏳ **Phase 4**: Compression, Caching & Memory Modules (Efficiency techniques)
+- ⏳ **Phase 5**: Reranking & Hybrid Search Modules (Quality techniques)
+- ⏳ **Phase 6**: Advanced Technique Modules (Graph RAG, adaptive chunking)
 - ⏳ **Phase 7**: System Integration & Optimization
+
+**Architecture Shift**: Each phase after Phase 2 implements ONE technique as a pluggable module that can be toggled and configured independently.
 
 ## 🏗️ Project Structure
 
@@ -223,9 +227,27 @@ export MODELS_OLLAMA_ENABLED=yes  # Automatically converted to bool True
 
 ## 📚 Documentation
 
-- **[BACKLOG.md](BACKLOG.md)** - Detailed implementation plan for all phases
+- **[BACKLOG.md](BACKLOG.md)** - Detailed implementation plan with modular architecture
 - **[.context/](.context/)** - AI assistant context files
 - **[docs/phase_summaries/](docs/phase_summaries/)** - Phase completion reports
+
+### Experimentation Workflow
+
+The platform enables systematic comparison of context engineering techniques:
+
+1. **Configure**: Toggle techniques on/off, adjust parameters, select presets
+2. **Run**: Execute query with current configuration (automatically saved to history)
+3. **Store**: Last 8 runs kept in history with full context
+4. **Compare**: Select multiple runs to see side-by-side differences
+5. **Analyze**: View metric deltas in Metrics dashboard
+6. **Iterate**: Refine configuration based on insights
+
+**Example**: Run "What is RAG?" three times:
+- Run 1: Baseline (no techniques) → Accuracy: 0.85
+- Run 2: +RAG enabled → Accuracy: 0.95 (+10%)
+- Run 3: +RAG +Compression → Accuracy: 0.93, Tokens: -22%
+
+Compare all three to see which configuration offers the best tradeoff.
 
 ## 🔬 Current Phase: Phase 1 ✅ COMPLETE
 
@@ -276,17 +298,28 @@ Phase 1.5 delivers a modern React frontend with AG-UI integration:
 - Responsive design with dark mode support
 - WebSocket streaming for live agent updates
 
-## 🔮 Next Steps: Phase 2 - RAG Implementation
+## 🔮 Next Steps: Phase 2 - Modular Platform Infrastructure
 
-**This is where context engineering truly begins!**
+**Building the foundation for experimentation!**
 
-Phase 2 will add the critical RAG retrieval tool:
-- Set up ChromaDB vector database
-- Create RAG retrieval tool
-- Implement document ingestion pipeline
-- Add document upload UI in frontend
-- Integrate RAG with agent
-- **Measure context engineering gains**: First meaningful metrics improvement!
+Phase 2 builds the infrastructure that makes context engineering techniques toggleable and comparable:
+
+### Backend Infrastructure
+- **Configuration System**: Dataclass with toggles for 6 techniques (RAG, Compression, Reranking, Caching, Hybrid Search, Memory)
+- **Run History**: Track last 8 runs with query, config, response, and metrics
+- **Modular Pipeline**: Base class for all technique modules + orchestrator
+- **API Endpoints**: `/api/runs`, `/api/config`, `/api/runs/compare`
+
+### Frontend Components
+- **Configuration Panel**: Simple toggles + advanced settings for each technique
+- **Run History Sidebar**: View and select from last 8 runs
+- **Run Comparison Modal**: Side-by-side comparison with metric deltas
+- **Updated Metrics Page**: Compare selected runs instead of sequential phases
+
+### Why This Matters
+This phase transforms the application from "what does Phase 3 deliver?" to "what happens when I turn RAG on?" - enabling true experimentation with context engineering techniques.
+
+**After Phase 2**, each subsequent phase will implement ONE technique module that plugs into this infrastructure.
 
 ## 🤝 Contributing
 
@@ -389,4 +422,4 @@ ls context_engineering_agent/  # Should show agent.py and __init__.py
 
 **Note**: This project uses local models for zero-cost experimentation. All metrics are reproducible on consumer hardware.
 
-*Last Updated: Phase 1.5 Complete - 2025-10-31*
+*Last Updated: Phase 1.5 Complete - Architecture Shift to Modular Platform - 2025-11-03*
