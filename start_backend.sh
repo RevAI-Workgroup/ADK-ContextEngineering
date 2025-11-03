@@ -1,7 +1,7 @@
 #!/bin/bash
 # Helper script to start the FastAPI backend with the correct virtual environment
 
-cd "$(dirname "$0")"
+cd "$(dirname "$0")" || exit 1
 
 if [ ! -f venv/bin/activate ]; then
   echo "❌ Error: Virtual environment not found at venv/bin/activate"
