@@ -18,7 +18,9 @@ export const metricsService = {
    * Get metrics for a specific phase
    */
   async getPhaseMetrics(phaseId: string): Promise<PhaseMetricsResponse> {
-    const response = await api.get<PhaseMetricsResponse>(`/api/metrics/phase/${phaseId}`)
+    const response = await api.get<PhaseMetricsResponse>(
+      `/api/metrics/phase/${encodeURIComponent(phaseId)}`
+    )
     return response.data
   },
 
