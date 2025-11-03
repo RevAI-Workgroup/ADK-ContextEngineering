@@ -348,10 +348,132 @@ context-engineering-sandbox/
 
 ---
 
-## Phase 2: Basic RAG Implementation ⚠️ CRITICAL FOR CONTEXT ENGINEERING
-**Objective**: Add retrieval-augmented generation with vector database
+## Phase 2: Modular Platform Infrastructure ⚠️ CRITICAL FOR EXPERIMENTATION
+**Objective**: Build the toggleable architecture that allows dynamic configuration and comparison of context engineering techniques
 
-**Key Context Engineering Tool**: RAG Retrieval Tool - This is where context engineering truly begins! This tool will retrieve relevant documents from a vector database and inject them as context into the agent's prompts, directly demonstrating how adding relevant context improves answer quality.
+**Key Shift**: This phase transforms the application from a linear progression to a modular experimentation platform. Instead of implementing specific techniques, we build the infrastructure that allows any technique to be toggled on/off and compared systematically.
+
+### Backend Configuration System
+- [ ] Create `src/core/context_config.py` with `ContextEngineeringConfig` dataclass
+- [ ] Define technique toggles: `rag_enabled`, `compression_enabled`, `reranking_enabled`, `caching_enabled`, `hybrid_search_enabled`, `memory_enabled`
+- [ ] Add detailed configuration parameters for each technique (chunk_size, top_k, compression_ratio, etc.)
+- [ ] Implement configuration presets: "baseline", "basic_rag", "advanced_rag", "full_stack"
+- [ ] Add JSON serialization/deserialization for API transport
+- [ ] Create configuration validation logic
+
+### Backend Run History System
+- [ ] Create `src/memory/run_history.py` with `RunRecord` dataclass
+- [ ] Implement `RunHistoryManager` class for managing last 8 runs
+- [ ] Store run history in `data/run_history.json` with atomic writes
+- [ ] Include in each run: id (UUID), query, config, response, metrics, timestamp, model
+- [ ] Implement methods: `add_run()`, `get_recent_runs()`, `get_runs_by_query()`, `clear_history()`
+- [ ] Add thread-safe file operations
+
+### Backend Modular Pipeline Architecture
+- [ ] Create `src/core/modular_pipeline.py` with base `ContextEngineeringModule` class
+- [ ] Define module interface: `enabled`, `configure()`, `process()`, `get_metrics()`
+- [ ] Implement stub modules (to be filled in future phases):
+  - `RAGModule` - placeholder for vector retrieval
+  - `CompressionModule` - placeholder for context compression
+  - `RerankingModule` - placeholder for document reranking
+  - `CachingModule` - placeholder for semantic cache
+  - `HybridSearchModule` - placeholder for BM25+vector search
+  - `MemoryModule` - placeholder for conversation memory
+- [ ] Create `ContextPipeline` orchestrator that chains enabled modules
+- [ ] Implement metric aggregation from all active modules
+
+### Backend API Endpoints
+- [ ] Update `src/api/adk_wrapper.py` to accept `config` parameter in `process_message()`
+- [ ] Integrate `ContextPipeline` before ADK agent processing
+- [ ] Add `GET /api/runs` - Get recent runs (with optional query filter)
+- [ ] Add `GET /api/runs/{run_id}` - Get specific run by ID
+- [ ] Add `POST /api/runs/clear` - Clear run history
+- [ ] Add `GET /api/runs/compare` - Compare multiple runs (query param: `run_ids`)
+- [ ] Add `GET /api/config/presets` - Get available configuration presets
+- [ ] Add `POST /api/config/validate` - Validate configuration object
+- [ ] Add `GET /api/config/default` - Get default configuration
+
+### Frontend Configuration Panel
+- [ ] Create `frontend/src/components/chat/ConfigurationPanel.tsx`
+- [ ] Implement collapsible panel with two tabs: "Simple" and "Advanced"
+- [ ] Simple tab: Toggle switches for each technique (6 switches)
+- [ ] Simple tab: Preset selector dropdown with "Apply Preset" button
+- [ ] Advanced tab: Accordion sections for each enabled technique
+- [ ] Advanced tab: Detailed controls (sliders, inputs, dropdowns) per technique
+- [ ] Add "Reset to Default" button
+- [ ] Implement real-time validation feedback
+- [ ] Update `frontend/src/contexts/ChatContext.tsx` to manage config state
+- [ ] Add config persistence in localStorage
+
+### Frontend Run History & Comparison
+- [ ] Create `frontend/src/components/chat/RunHistory.tsx` sidebar
+- [ ] Display last 8 runs with: query preview, config badges, timestamp, key metrics
+- [ ] Add checkboxes for run selection
+- [ ] Implement filter by query text
+- [ ] Add "Clear History" button with confirmation dialog
+- [ ] Add "Re-run with different config" button (pre-fills query)
+- [ ] Create `frontend/src/components/chat/RunComparison.tsx` modal
+- [ ] Implement side-by-side comparison table showing:
+  - Query (same for all selected runs)
+  - Configuration differences (highlighted)
+  - Response text (scrollable)
+  - Metrics comparison (color-coded: green=better, red=worse)
+- [ ] Add "Export comparison as JSON" functionality
+- [ ] Add "Run new variation" button
+- [ ] Update `frontend/src/pages/Chat.tsx` to integrate new components
+
+### Frontend Services & Types
+- [ ] Create `frontend/src/types/config.types.ts` with interfaces:
+  - `ContextEngineeringConfig`
+  - `TechniqueConfig` (detailed settings per technique)
+  - `ConfigPreset`
+- [ ] Create `frontend/src/types/run.types.ts` with interfaces:
+  - `RunRecord`
+  - `RunComparison`
+- [ ] Create `frontend/src/services/configService.ts` with API calls:
+  - `getPresets()`, `validateConfig()`, `getDefaultConfig()`
+- [ ] Create `frontend/src/services/runHistoryService.ts` with API calls:
+  - `getRecentRuns()`, `getRunById()`, `clearHistory()`, `compareRuns()`
+
+### Frontend Metrics Page Updates
+- [ ] Update `frontend/src/pages/Metrics.tsx` from "Phase Comparison" to "Run Comparison"
+- [ ] Add run selector UI with multi-select dropdown
+- [ ] Add filters: date range, query text, enabled techniques
+- [ ] Update charts to plot selected runs instead of phases
+- [ ] Add configuration overlay showing which techniques were active per run
+- [ ] Keep existing chart types (latency, accuracy, relevance, hallucination)
+- [ ] Add new "Technique Impact" chart (bar chart showing metric delta)
+- [ ] Update `frontend/src/hooks/useMetrics.ts` with `selectedRunIds` state
+
+### Testing & Documentation
+- [ ] Add unit tests for configuration validation
+- [ ] Add unit tests for run history management
+- [ ] Test configuration panel UI with all toggles
+- [ ] Test run history storage and retrieval
+- [ ] Test run comparison with multiple configurations
+- [ ] Document new API endpoints
+- [ ] Document configuration schema
+- [ ] Create usage guide for experimentation workflow
+
+### Phase 2 Summary
+- [ ] Document modular platform architecture
+- [ ] Create guide for adding new technique modules
+- [ ] Report on infrastructure performance
+- [ ] Prepare for Phase 3 (first technique implementation)
+
+---
+
+## Phase 3: RAG Module Implementation
+**Objective**: Implement RAG as the first pluggable technique module
+
+**Key Approach**: Implement RAGModule that extends ContextEngineeringModule (from Phase 2). This module can be toggled on/off and configured dynamically through the UI.
+
+### RAG Module Development
+- [ ] Implement `RAGModule` class extending `ContextEngineeringModule`
+- [ ] Override `configure()` method to accept RAG-specific settings
+- [ ] Implement `process()` method for document retrieval and context injection
+- [ ] Implement `get_metrics()` to report retrieval-specific metrics
+- [ ] Register module with ContextPipeline orchestrator
 
 ### Vector Database Setup
 - [ ] Install and configure ChromaDB (local)
@@ -381,45 +503,115 @@ context-engineering-sandbox/
 - [ ] Implement context assembly with retrieved documents
 - [ ] Create retrieval debugging/visualization tools
 
-### Integration & Testing
-- [ ] Integrate RAG with ADK agent
-- [ ] Update /chat endpoint to use RAG
+### Frontend RAG Configuration
+- [ ] Add RAG toggle to ConfigurationPanel
+- [ ] Add RAG advanced settings: chunk_size, top_k, embedding_model
+- [ ] Update configuration types to include RAG settings
+- [ ] Add RAG status indicator in RunHistory
+- [ ] Display RAG metrics in comparison view
+
+### Testing & Experimentation
+- [ ] Test RAG toggle on/off functionality
 - [ ] Create RAG-specific test datasets
+- [ ] Run baseline vs. RAG comparison experiments
 - [ ] Measure retrieval accuracy and relevance
 - [ ] Benchmark latency impact of RAG
-- [ ] Compare metrics with Phase 1
+- [ ] Document optimal RAG configurations discovered
 
-### Phase 2 Summary
-- [ ] Document RAG implementation details
-- [ ] Create retrieval performance report
-- [ ] Update metrics dashboard
-- [ ] Document optimal chunk sizes discovered
+### Phase 3 Summary
+- [ ] Document RAG module implementation
+- [ ] Create RAG configuration guide
+- [ ] Report on RAG performance impact
+- [ ] Document integration patterns for future modules
 
 ---
 
-## Phase 3: Advanced Retrieval Techniques
-**Objective**: Enhance retrieval with hybrid search, reranking, and smart chunking
+## Phase 4: Compression & Caching Modules
+**Objective**: Implement context compression and semantic caching as pluggable modules
 
-### Hybrid Search Implementation
-- [ ] Add BM25 keyword search alongside vector search
-- [ ] Create hybrid scoring algorithm
-- [ ] Implement adjustable weight parameters
-- [ ] Build search result fusion logic
-- [ ] Add search strategy selection based on query type
+**Key Approach**: Add two new modules that focus on efficiency - reducing token usage (compression) and reducing redundant processing (caching).
 
-### Semantic Chunking Strategies
-- [ ] Implement sentence-based chunking
-- [ ] Create paragraph-based chunking
-- [ ] Add markdown structure-aware chunking
-- [ ] Implement topic-based chunking using clustering
-- [ ] Create chunk size optimization logic
+### Compression Module Development
+- [ ] Implement `CompressionModule` class extending `ContextEngineeringModule`
+- [ ] Implement extractive summarization for context compression
+- [ ] Create abstractive compression using smaller models
+- [ ] Build token budget management system
+- [ ] Add importance scoring for context elements
+- [ ] Implement selective context inclusion
+- [ ] Create compression quality metrics
+- [ ] Implement compression ratio monitoring
 
-### Document Reranking
+### Caching Module Development
+- [ ] Implement `CachingModule` class extending `ContextEngineeringModule`
+- [ ] Set up simple in-memory cache (Redis optional for production)
+- [ ] Implement semantic similarity for cache keys
+- [ ] Create cache invalidation strategies
+- [ ] Add cache hit rate monitoring
+- [ ] Build cache warming utilities
+- [ ] Implement TTL (time-to-live) for cache entries
+
+### Memory Module Development
+- [ ] Implement `MemoryModule` class extending `ContextEngineeringModule`
+- [ ] Design conversation state schema
+- [ ] Implement short-term memory buffer
+- [ ] Create conversation history summarization
+- [ ] Build memory retrieval system
+- [ ] Add memory pruning strategies
+- [ ] Implement temporal weighting for recent context
+
+### Frontend Configuration
+- [ ] Add Compression toggle and settings (compression_ratio, method)
+- [ ] Add Caching toggle and settings (ttl, similarity_threshold)
+- [ ] Add Memory toggle and settings (max_turns, summarization_enabled)
+- [ ] Update configuration types for new modules
+- [ ] Add module status indicators in RunHistory
+
+### Testing & Experimentation
+- [ ] Test Compression: measure token reduction vs. quality preservation
+- [ ] Test Caching: measure cache hit rates and latency savings
+- [ ] Test Memory: evaluate multi-turn conversation coherence
+- [ ] Run experiments: Baseline vs. +Compression vs. +Caching vs. +Both
+- [ ] Document optimal configurations for each module
+- [ ] Benchmark cost savings from compression and caching
+
+### Phase 4 Summary
+- [ ] Document compression, caching, and memory modules
+- [ ] Create efficiency optimization guide
+- [ ] Report on cost/performance tradeoffs
+- [ ] Analyze combined impact of efficiency modules
+
+---
+
+## Phase 5: Reranking & Hybrid Search Modules
+**Objective**: Implement advanced retrieval techniques as pluggable modules
+
+**Key Approach**: Enhance the RAG module with reranking and hybrid search capabilities that can be independently toggled.
+
+### Reranking Module Development
+- [ ] Implement `RerankingModule` class extending `ContextEngineeringModule`
 - [ ] Integrate cross-encoder model for reranking
 - [ ] Implement multi-stage retrieval (retrieve more, rerank, return top)
 - [ ] Create relevance scoring pipeline
 - [ ] Add diversity-aware reranking
 - [ ] Implement MMR (Maximal Marginal Relevance)
+- [ ] Create reranking performance metrics
+
+### Hybrid Search Module Development
+- [ ] Implement `HybridSearchModule` class extending `ContextEngineeringModule`
+- [ ] Add BM25 keyword search alongside vector search
+- [ ] Create hybrid scoring algorithm
+- [ ] Implement adjustable weight parameters (bm25_weight, vector_weight)
+- [ ] Build search result fusion logic
+- [ ] Add search strategy selection based on query type
+- [ ] Create hybrid search performance metrics
+
+### Advanced Chunking Strategies
+- [ ] Implement sentence-based chunking option
+- [ ] Create paragraph-based chunking option
+- [ ] Add markdown structure-aware chunking
+- [ ] Implement topic-based chunking using clustering
+- [ ] Create chunk size optimization logic
+- [ ] Make chunking strategy configurable via UI
 
 ### Query Enhancement
 - [ ] Implement query expansion techniques
@@ -428,164 +620,81 @@ context-engineering-sandbox/
 - [ ] Implement multi-query retrieval
 - [ ] Create query intent classification
 
-### Performance Optimization
-- [ ] Add parallel retrieval processing
-- [ ] Implement retrieval result caching
-- [ ] Optimize embedding computation
-- [ ] Create retrieval performance profiler
-- [ ] Add retrieval explanation/debugging
+### Frontend Configuration
+- [ ] Add Reranking toggle and settings (reranker_model, diversity_threshold)
+- [ ] Add Hybrid Search toggle and settings (bm25_weight, vector_weight)
+- [ ] Add Chunking strategy selector in RAG settings
+- [ ] Update configuration types for new modules
+- [ ] Display reranking and hybrid search metrics in comparison
 
-### Testing & Evaluation
-- [ ] Create advanced retrieval test sets
-- [ ] Measure precision/recall improvements
-- [ ] Benchmark hybrid vs. pure vector search
-- [ ] Evaluate reranking impact on relevance
-- [ ] Compare different chunking strategies
-- [ ] Document optimal configurations
-
-### Phase 3 Summary
-- [ ] Create retrieval techniques comparison report
-- [ ] Document best practices discovered
-- [ ] Update configuration recommendations
-- [ ] Analyze cost/benefit of each technique
-
----
-
-## Phase 4: Memory & State Management
-**Objective**: Add conversation memory and semantic caching for efficiency
-
-### Conversation Memory
-- [ ] Design conversation state schema
-- [ ] Implement short-term memory buffer
-- [ ] Create long-term memory with summarization
-- [ ] Build memory retrieval system
-- [ ] Add memory pruning strategies
-
-### Semantic Caching
-- [ ] Set up Redis or similar for caching
-- [ ] Implement semantic similarity for cache keys
-- [ ] Create cache invalidation strategies
-- [ ] Add cache hit rate monitoring
-- [ ] Build cache warming utilities
-
-### State Management
-- [ ] Create application state manager
-- [ ] Implement user session tracking
-- [ ] Add context window state monitoring
-- [ ] Build state persistence layer
-- [ ] Create state recovery mechanisms
-
-### Memory-Augmented Retrieval
-- [ ] Integrate conversation history into retrieval
-- [ ] Implement temporal weighting for recent context
-- [ ] Add personalization based on interaction history
-- [ ] Create memory-aware reranking
-- [ ] Build context relevance decay modeling
-
-### Testing & Evaluation
-- [ ] Create multi-turn conversation test sets
-- [ ] Measure cache hit rates and cost savings
-- [ ] Evaluate memory impact on coherence
-- [ ] Benchmark latency improvements from caching
-- [ ] Test state recovery scenarios
-
-### Phase 4 Summary
-- [ ] Document memory architecture decisions
-- [ ] Create caching strategy guide
-- [ ] Report on cost savings achieved
-- [ ] Analyze conversation coherence improvements
-
----
-
-## Phase 5: Context Compression & Optimization
-**Objective**: Reduce token usage while maintaining quality through compression
-
-### Prompt Compression
-- [ ] Implement extractive summarization
-- [ ] Create abstractive compression using smaller models
-- [ ] Build token budget management system
-- [ ] Add importance scoring for context elements
-- [ ] Implement selective context inclusion
-
-### Dynamic Context Assembly
-- [ ] Create context priority system
-- [ ] Implement adaptive context window filling
-- [ ] Build query-aware context selection
-- [ ] Add context element ranking
-- [ ] Create context overflow handling
-
-### Filtering Strategies
-- [ ] Implement relevance-based filtering
-- [ ] Add redundancy detection and removal
-- [ ] Create noise filtering mechanisms
-- [ ] Build metadata-based filtering
-- [ ] Implement temporal relevance filtering
-
-### Compression Quality Assurance
-- [ ] Create compression quality metrics
-- [ ] Build information retention validator
-- [ ] Implement compression A/B testing
-- [ ] Add compression ratio monitoring
-- [ ] Create quality threshold configuration
-
-### Testing & Evaluation
-- [ ] Measure token reduction percentages
-- [ ] Evaluate quality preservation
-- [ ] Benchmark speed improvements
-- [ ] Analyze cost savings from compression
-- [ ] Test edge cases and failure modes
+### Testing & Experimentation
+- [ ] Test Reranking: measure precision/recall improvements
+- [ ] Test Hybrid Search: benchmark vs. pure vector search
+- [ ] Compare chunking strategies across different document types
+- [ ] Run experiments: RAG vs. RAG+Reranking vs. RAG+Hybrid vs. All
+- [ ] Document optimal configurations for each module
+- [ ] Analyze cost/benefit of advanced retrieval techniques
 
 ### Phase 5 Summary
-- [ ] Document compression techniques effectiveness
-- [ ] Create token optimization guide
-- [ ] Report on cost/quality tradeoffs
-- [ ] Provide compression best practices
+- [ ] Document reranking and hybrid search modules
+- [ ] Create advanced retrieval configuration guide
+- [ ] Report on retrieval quality improvements
+- [ ] Provide recommendations for technique combinations
 
 ---
 
-## Phase 6: Advanced Context Engineering
-**Objective**: Implement cutting-edge techniques like Graph RAG and intelligent routing
+## Phase 6: Advanced Technique Modules
+**Objective**: Implement cutting-edge context engineering techniques as pluggable modules
 
-### Graph RAG Implementation
-- [ ] Set up graph database (Neo4j or NetworkX)
+**Key Approach**: Add experimental/advanced modules for Graph RAG, adaptive chunking, and query routing that can be independently evaluated.
+
+### Graph RAG Module Development
+- [ ] Implement `GraphRAGModule` class extending `ContextEngineeringModule`
+- [ ] Set up graph database (NetworkX for simplicity, Neo4j for production)
 - [ ] Create knowledge graph construction pipeline
 - [ ] Implement entity extraction and linking
 - [ ] Build graph traversal algorithms
 - [ ] Create graph-vector hybrid retrieval
+- [ ] Implement graph-based context assembly
 
-### Adaptive Chunking
-- [ ] Implement content-aware dynamic chunking
-- [ ] Create chunk size predictor model
-- [ ] Build chunk boundary optimization
+### Adaptive Chunking Module Development
+- [ ] Implement `AdaptiveChunkingModule` class extending `ContextEngineeringModule`
+- [ ] Create content-aware dynamic chunking
+- [ ] Build chunk size predictor model
+- [ ] Implement chunk boundary optimization
 - [ ] Add chunk quality scoring
-- [ ] Implement chunk merging/splitting logic
+- [ ] Create chunk merging/splitting logic
+- [ ] Make adaptive chunking toggleable alternative to fixed chunking
 
-### Query Routing System
+### Query Routing Module Development
+- [ ] Implement `QueryRoutingModule` class extending `ContextEngineeringModule`
 - [ ] Create query intent classifier
 - [ ] Build routing decision engine
-- [ ] Implement specialized retrieval paths
+- [ ] Implement specialized retrieval paths for different query types
 - [ ] Add dynamic routing based on context
 - [ ] Create routing performance monitor
-
-### Integration & Orchestration
-- [ ] Integrate all advanced techniques
-- [ ] Create technique selection logic
-- [ ] Build adaptive system configuration
 - [ ] Implement fallback mechanisms
-- [ ] Add technique combination strategies
 
-### Testing & Evaluation
-- [ ] Create complex query test sets
-- [ ] Measure Graph RAG effectiveness
-- [ ] Evaluate routing accuracy
-- [ ] Benchmark adaptive chunking benefits
-- [ ] Test system robustness
+### Frontend Configuration
+- [ ] Add Graph RAG toggle and settings (graph_depth, entity_types)
+- [ ] Add Adaptive Chunking toggle and settings (min_chunk, max_chunk)
+- [ ] Add Query Routing toggle and settings (routing_strategy)
+- [ ] Update configuration types for advanced modules
+- [ ] Display advanced module metrics in comparison
+
+### Testing & Experimentation
+- [ ] Test Graph RAG: evaluate on knowledge-intensive queries
+- [ ] Test Adaptive Chunking: compare vs. fixed-size chunking
+- [ ] Test Query Routing: measure routing accuracy and performance
+- [ ] Run experiments: standard modules vs. + advanced modules
+- [ ] Document use cases where advanced modules excel
+- [ ] Analyze computational cost vs. quality benefit
 
 ### Phase 6 Summary
-- [ ] Document advanced techniques implementation
-- [ ] Create comparative analysis report
-- [ ] Provide technique selection guidelines
-- [ ] Summarize overall system improvements
+- [ ] Document advanced technique modules
+- [ ] Create advanced configuration guide
+- [ ] Report on when to use advanced techniques
+- [ ] Provide cost/benefit analysis of experimental features
 
 ---
 
@@ -630,15 +739,147 @@ context-engineering-sandbox/
 
 ## 📈 Success Metrics Tracking
 
-### Per-Phase Metrics Table Template
-| Metric | Baseline | Phase 1 | Phase 2 | Phase 3 | Phase 4 | Phase 5 | Phase 6 | Phase 7 |
-|--------|----------|---------|---------|---------|---------|---------|---------|---------|
-| Answer Accuracy | - | - | - | - | - | - | - | - |
-| Hallucination Rate | - | - | - | - | - | - | - | - |
+### Per-Technique Impact Metrics Table
+
+This table tracks the impact of individual context engineering techniques. Each column represents a configuration with specific techniques enabled, allowing us to measure the incremental value of each technique.
+
+| Metric | Baseline | +RAG | +RAG +Compression | +RAG +Reranking | +RAG +Caching | +RAG +Hybrid | +Memory | Full Stack |
+|--------|----------|------|-------------------|-----------------|---------------|--------------|---------|------------|
+| Answer Accuracy (ROUGE-1 F1) | - | - | - | - | - | - | - | - |
+| Relevance Score (0-1) | - | - | - | - | - | - | - | - |
+| Hallucination Rate (%) | - | - | - | - | - | - | - | - |
 | Avg Latency (ms) | - | - | - | - | - | - | - | - |
-| Tokens/Query | - | - | - | - | - | - | - | - |
-| Cache Hit Rate | N/A | N/A | N/A | N/A | - | - | - | - |
-| Cost/Query ($) | - | - | - | - | - | - | - | - |
+| P99 Latency (ms) | - | - | - | - | - | - | - | - |
+| Tokens per Query | - | - | - | - | - | - | - | - |
+| Cache Hit Rate (%) | N/A | N/A | N/A | N/A | - | N/A | N/A | - |
+| Cost per Query ($) | - | - | - | - | - | - | - | - |
+| Context Utilization (%) | N/A | - | - | - | - | - | - | - |
+
+**Key Insights:**
+- **Baseline**: No context engineering techniques enabled
+- **+RAG**: RAG module only (measures core retrieval impact)
+- **+RAG +Compression**: RAG with context compression (measures efficiency gains)
+- **+RAG +Reranking**: RAG with document reranking (measures relevance improvements)
+- **+RAG +Caching**: RAG with semantic caching (measures speed/cost optimization)
+- **+RAG +Hybrid**: RAG with hybrid search (measures keyword + semantic fusion)
+- **+Memory**: Conversation memory enabled (measures multi-turn coherence)
+- **Full Stack**: All techniques enabled (measures combined impact)
+
+**Measurement Approach:**
+1. Run same query with different configurations
+2. Store results in run history
+3. Compare metrics across configurations
+4. Identify which techniques provide most value for specific use cases
+
+**Analysis Questions:**
+- Which technique provides the best accuracy improvement?
+- Which technique provides the best latency improvement?
+- Which combination offers the best cost/quality tradeoff?
+- Are there diminishing returns when combining techniques?
+- Which techniques work synergistically vs. independently?
+
+---
+
+## 🧪 Experimentation Workflow
+
+This platform enables systematic comparison of context engineering techniques through a structured experimentation workflow.
+
+### How to Use the Platform
+
+1. **Configure**: Open the Configuration Panel in the Chat interface
+   - Use Simple tab for quick toggle on/off of techniques
+   - Use Advanced tab for detailed parameter tuning
+   - Select presets (Baseline, Basic RAG, Advanced RAG, Full Stack) as starting points
+
+2. **Run**: Execute your query with the current configuration
+   - Type your question in the chat interface
+   - Click "Save & Run" to store the run in history
+   - System automatically captures: query, response, configuration, metrics, timestamp
+
+3. **Store**: Run history automatically saves last 8 runs
+   - View in the Run History sidebar
+   - Each run shows: query preview, active techniques (badges), key metrics
+   - Filter runs by query text to find related experiments
+
+4. **Compare**: Select multiple runs to see side-by-side comparison
+   - Check boxes next to runs you want to compare
+   - Click "Compare Selected" to open comparison view
+   - See configuration differences, response variations, metric deltas
+   - Metrics are color-coded: green=better, red=worse
+
+5. **Analyze**: Review metrics in the Metrics dashboard
+   - Select runs to visualize on charts
+   - Filter by date, query, or enabled techniques
+   - View "Technique Impact" chart showing contribution of each technique
+   - Export data for further analysis
+
+6. **Iterate**: Refine your configuration based on insights
+   - Re-run same query with adjusted settings
+   - Test combinations of techniques
+   - Document which configurations work best for different query types
+
+### Example Experimentation Session
+
+**Goal**: Determine if RAG improves accuracy for factual questions
+
+**Steps:**
+1. Run 1: "What is the capital of France?" (Baseline - no techniques)
+   - Metrics: Accuracy: 0.85, Latency: 250ms, Tokens: 120
+2. Run 2: Same query (RAG enabled, chunk_size=500, top_k=3)
+   - Metrics: Accuracy: 0.95, Latency: 450ms, Tokens: 180
+3. Run 3: Same query (RAG + Compression enabled, compression_ratio=0.7)
+   - Metrics: Accuracy: 0.93, Latency: 420ms, Tokens: 140
+4. Compare all three runs
+   - **Finding**: RAG improves accuracy +10%, but adds 200ms latency
+   - **Finding**: Compression reduces tokens -22% with minimal accuracy loss (-2%)
+   - **Conclusion**: RAG+Compression offers best balance for factual queries
+
+### Best Practices
+
+**Query Selection:**
+- Use consistent queries across runs for valid comparisons
+- Test on different query types: factual, reasoning, creative, multi-turn
+- Create query categories and test each category systematically
+
+**Configuration Strategy:**
+- Start with Baseline to establish reference point
+- Add techniques one at a time to isolate impact
+- Test combinations after understanding individual effects
+- Document unexpected interactions between techniques
+
+**Metric Interpretation:**
+- Higher accuracy/relevance is better
+- Lower latency/tokens/cost is better
+- Lower hallucination rate is better
+- Consider tradeoffs: accuracy vs. speed, quality vs. cost
+
+**Run Management:**
+- Clear history periodically to keep focused on current experiments
+- Export important comparison results before clearing
+- Use descriptive queries that explain what you're testing
+- Take notes on surprising or counterintuitive results
+
+### Common Experiment Patterns
+
+**Pattern 1: Baseline vs. Single Technique**
+- Purpose: Measure pure impact of one technique
+- Runs: Baseline, +RAG
+- Compare: All metrics to see technique's isolated effect
+
+**Pattern 2: Incremental Addition**
+- Purpose: Measure cumulative impact as techniques are added
+- Runs: Baseline, +RAG, +RAG+Compression, +RAG+Compression+Reranking
+- Compare: See if benefits are additive or have diminishing returns
+
+**Pattern 3: Technique Substitution**
+- Purpose: Compare alternative approaches to same problem
+- Runs: +RAG (vector only), +RAG+Hybrid (vector+BM25)
+- Compare: Determine which approach works better for your queries
+
+**Pattern 4: Parameter Tuning**
+- Purpose: Find optimal settings for a technique
+- Runs: RAG (top_k=3), RAG (top_k=5), RAG (top_k=10)
+- Compare: Identify sweet spot for configuration parameters
 
 ---
 
@@ -678,6 +919,26 @@ context-engineering-sandbox/
 ---
 
 ## 📝 Recent Updates
+
+### 2025-11-03 - Architecture Shift to Modular Platform 🔄
+- 🔄 **Changed from linear phases to modular experimentation platform**
+- 🎯 **New Phase 2 objective**: Build infrastructure for toggleable techniques (not implement RAG directly)
+- 📊 **Metrics shift**: Compare runs with different configs, not sequential phases
+- 🔧 **Key features planned**:
+  - Dynamic configuration with simple toggles + advanced settings
+  - Run history tracking (last 8 runs)
+  - Side-by-side run comparison with same query
+  - Technique impact visualization
+  - Configuration presets (Baseline, Basic RAG, Advanced RAG, Full Stack)
+- 🚀 **Phases 3-6 restructured**: Each implements ONE technique as pluggable module
+  - Phase 3: RAG Module (vector retrieval, embeddings, chunking)
+  - Phase 4: Compression, Caching & Memory Modules (efficiency focus)
+  - Phase 5: Reranking & Hybrid Search Modules (quality focus)
+  - Phase 6: Advanced Modules (Graph RAG, adaptive chunking, routing)
+- 💡 **Goal**: Enable systematic experimentation to measure real impact of each technique
+- 📚 **New Experimentation Workflow**: Documented patterns for comparing techniques
+- 📈 **New Metrics Table**: Per-Technique Impact instead of Per-Phase Progression
+- 🧪 **Rationale**: Users wanted to see "what happens when I turn RAG on vs off" not "what Phase 3 delivers vs Phase 2"
 
 ### 2025-10-27 - Phase 1 COMPLETE ✅
 - ✅ **Phase 1 MVP Agent with Google ADK - COMPLETE**
@@ -721,5 +982,5 @@ context-engineering-sandbox/
 
 ---
 
-*Last Updated: 2025-10-31*
-*Current Phase: Phase 1.5 Complete ✅ - Ready for Phase 2 (RAG Implementation)*
+*Last Updated: 2025-11-03*
+*Current Phase: Phase 1.5 Complete ✅ - Ready for Phase 2 (Modular Platform Infrastructure)*
