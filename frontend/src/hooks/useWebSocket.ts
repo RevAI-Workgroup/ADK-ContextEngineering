@@ -60,6 +60,8 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
       reconnectTimeoutRef.current = null
     }
 
+    isIntentionalCloseRef.current = false
+
     try {
       console.log('[WebSocket] Creating new connection...')
       ws.current = new WebSocket(`${WS_URL}/api/chat/ws`)
