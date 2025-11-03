@@ -4,7 +4,7 @@
 
 set -e
 
-cd "$(dirname "$0")"
+cd "$(dirname "$0")" || exit 1
 
 # Color codes
 BLUE='\033[0;34m'
