@@ -9,6 +9,9 @@ Set-Location $PSScriptRoot
 $BackendJob = $null
 $FrontendJob = $null
 
+# Track exit code - only exit happens in Cleanup function
+$Script:ExitCode = 0
+
 function Write-Log {
     param(
         [string]$Prefix,
@@ -37,7 +40,7 @@ function Cleanup {
     Get-Process | Where-Object { $_.CommandLine -like "*vite*" } -ErrorAction SilentlyContinue | Stop-Process -Force
     
     Write-Log "SYSTEM" "All servers stopped" "Yellow"
-    exit 0
+    exit $Script:ExitCode
 }
 
 # Set up cleanup on exit
@@ -59,7 +62,8 @@ if (-not (Test-Path "venv\Scripts\Activate.ps1")) {
     Write-Log "ERROR" "Virtual environment not found!" "Red"
     Write-Log "ERROR" "Please run: python -m venv venv" "Red"
     Write-Log "ERROR" "Then: .\venv\Scripts\Activate.ps1; pip install -r requirements.txt" "Red"
-    exit 1
+    $Script:ExitCode = 1
+    Cleanup
 }
 
 try {
@@ -104,11 +108,13 @@ try {
 
         if ($BackendState -eq "Failed" -or $FrontendState -eq "Failed") {
             Write-Log "ERROR" "One or more servers failed" "Red"
+            $Script:ExitCode = 1
             Cleanup
         }
 
         if ($BackendState -eq "Completed" -or $FrontendState -eq "Completed") {
             Write-Log "SYSTEM" "One or more servers stopped" "Yellow"
+            $Script:ExitCode = 1
             Cleanup
         }
 
@@ -117,7 +123,7 @@ try {
 
 } catch {
     Write-Log "ERROR" "Failed to start servers: $_" "Red"
+    $Script:ExitCode = 1
     Cleanup
-    exit 1
 }
 

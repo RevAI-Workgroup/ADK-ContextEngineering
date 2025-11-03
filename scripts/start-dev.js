@@ -36,6 +36,8 @@ function startBackend() {
     log('BACKEND', 'Starting FastAPI server...', colors.blue);
 
     let backendProcess;
+    let settled = false;
+    let startupTimer;
     
     if (isWindows) {
       // Windows: Use cmd to run activation and uvicorn
@@ -73,18 +75,32 @@ function startBackend() {
     });
 
     backendProcess.on('error', (error) => {
-      log('BACKEND', `Error: ${error.message}`, colors.red);
-      reject(error);
+      if (!settled) {
+        settled = true;
+        clearTimeout(startupTimer);
+        log('BACKEND', `Error: ${error.message}`, colors.red);
+        reject(error);
+      }
     });
 
     backendProcess.on('exit', (code) => {
       if (code !== 0 && code !== null) {
         log('BACKEND', `Exited with code ${code}`, colors.red);
+        if (!settled) {
+          settled = true;
+          clearTimeout(startupTimer);
+          reject(new Error(`Backend process exited with code ${code}`));
+        }
       }
     });
 
     // Give backend a moment to start
-    setTimeout(() => resolve(backendProcess), 1000);
+    startupTimer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        resolve(backendProcess);
+      }
+    }, 1000);
   });
 }
 
@@ -93,6 +109,8 @@ function startFrontend() {
     log('FRONTEND', 'Starting Vite dev server...', colors.green);
 
     const frontendDir = path.join(rootDir, 'frontend');
+    let settled = false;
+    let startupTimer;
     
     // Use pnpm to start the frontend
     const frontendProcess = spawn(isWindows ? 'pnpm.cmd' : 'pnpm', ['dev'], {
@@ -122,17 +140,32 @@ function startFrontend() {
     });
 
     frontendProcess.on('error', (error) => {
-      log('FRONTEND', `Error: ${error.message}`, colors.red);
-      reject(error);
+      if (!settled) {
+        settled = true;
+        clearTimeout(startupTimer);
+        log('FRONTEND', `Error: ${error.message}`, colors.red);
+        reject(error);
+      }
     });
 
     frontendProcess.on('exit', (code) => {
       if (code !== 0 && code !== null) {
         log('FRONTEND', `Exited with code ${code}`, colors.red);
+        if (!settled) {
+          settled = true;
+          clearTimeout(startupTimer);
+          reject(new Error(`Frontend process exited with code ${code}`));
+        }
       }
     });
 
-    resolve(frontendProcess);
+    // Give frontend a moment to start
+    startupTimer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        resolve(frontendProcess);
+      }
+    }, 1000);
   });
 }
 

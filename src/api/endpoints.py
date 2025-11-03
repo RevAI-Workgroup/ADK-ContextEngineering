@@ -12,6 +12,7 @@ import httpx
 import subprocess
 import platform
 import shutil
+import asyncio
 
 from src.api.adk_wrapper import ADKAgentWrapper
 from src.evaluation.metrics import MetricsCollector
@@ -176,10 +177,15 @@ async def chat_websocket(websocket: WebSocket):
                 })
                 continue
             
+            # Extract model from message data
+            selected_model = message_data.get("selectedModel")
+            logger.info(f"Processing WebSocket message with model: {selected_model or 'default'}")
+            
             # Process message with streaming
             async for event in adk_wrapper.process_message_stream(
                 message=message_data["message"],
-                session_id=message_data.get("session_id")
+                session_id=message_data.get("session_id"),
+                model=selected_model
             ):
                 await websocket.send_json({
                     "type": event["type"],
@@ -509,12 +515,15 @@ async def clear_running_models():
                 
                 # Use subprocess to run 'ollama stop <model>'
                 # This works cross-platform
-                process = subprocess.run(
-                    [ollama_cmd, "stop", model_name],
-                    capture_output=True,
-                    text=True,
-                    timeout=10,
-                    check=False
+                # Run subprocess off the event loop to avoid blocking
+                process = await asyncio.to_thread(
+                    lambda: subprocess.run(
+                        [ollama_cmd, "stop", model_name],
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                        check=False
+                    )
                 )
                 
                 if process.returncode == 0:

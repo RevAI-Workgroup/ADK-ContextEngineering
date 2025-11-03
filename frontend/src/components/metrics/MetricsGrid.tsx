@@ -1,5 +1,6 @@
 import { MetricsCard } from './MetricsCard'
 import { Clock, Zap, FileText, DollarSign, Target, AlertTriangle } from 'lucide-react'
+import { isLowerBetter } from '../../utils/metrics'
 
 interface MetricsGridProps {
   metrics: {
@@ -23,13 +24,13 @@ export function MetricsGrid({ metrics, comparison }: MetricsGridProps) {
 
     const { improvement_pct } = comparison[metricName]
     // For some metrics, lower is better (latency, hallucination, cost)
-    const lowerIsBetter = ['latency_ms_mean', 'hallucination_rate_mean', 'cost_per_query'].includes(metricName)
+    const lowerIsBetterMetric = isLowerBetter(metricName)
 
     return {
       // Value must be non-negative (magnitude of change)
       value: Math.abs(improvement_pct),
       // isPositive indicates the direction (true = improvement, false = decline)
-      isPositive: lowerIsBetter ? improvement_pct < 0 : improvement_pct > 0,
+      isPositive: lowerIsBetterMetric ? improvement_pct < 0 : improvement_pct > 0,
     }
   }
 

@@ -7,6 +7,7 @@ import { LoadingSpinner } from '../components/common/LoadingSpinner'
 import { ErrorMessage } from '../components/common/ErrorMessage'
 import { Button } from '../components/ui/button'
 import { RefreshCw, TrendingUp } from 'lucide-react'
+import { isLowerBetter } from '../utils/metrics'
 
 export function Metrics() {
   const { loading, isLoading, errors, metrics, comparison, fetchMetrics, fetchComparison } = useMetrics()
@@ -151,11 +152,8 @@ interface ImprovementItemProps {
 }
 
 function ImprovementItem({ metric, baseline, latest, improvement }: ImprovementItemProps) {
-  // Metrics where lower values are better
-  const lowerIsBetter = ['latency_ms_mean', 'hallucination_rate_mean']
-  
   // Compute effective improvement (invert for lower-is-better metrics)
-  const effectiveImprovement = lowerIsBetter.includes(metric) ? -improvement : improvement
+  const effectiveImprovement = isLowerBetter(metric) ? -improvement : improvement
   const isPositive = effectiveImprovement > 0
   
   const metricNames: Record<string, string> = {

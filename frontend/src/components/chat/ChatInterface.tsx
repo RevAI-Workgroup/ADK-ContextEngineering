@@ -32,11 +32,17 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
     messageId: string
   } | null>(null)
 
+  // Track last processed event to avoid re-processing on every update
+  const lastProcessedEventIndex = useRef<number>(-1)
+
   // Process WebSocket events in real-time
   useEffect(() => {
     if (!useRealtime || events.length === 0) return
 
-    events.forEach((event) => {
+    // Only process events that haven't been processed yet
+    const newEvents = events.slice(lastProcessedEventIndex.current + 1)
+    
+    newEvents.forEach((event) => {
       switch (event.type) {
         case 'thinking': {
           // TypeScript now knows event.data is ThinkingEventData
@@ -111,6 +117,7 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
             setMessages((prev) => [...prev, assistantMessage])
             streamingMessageRef.current = null
             setIsProcessing(false)
+            lastProcessedEventIndex.current = -1 // Reset event tracking
             clearEvents()
           }
           break
@@ -123,11 +130,17 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
           setErrorMessage(errorMsg)
           streamingMessageRef.current = null
           setIsProcessing(false)
+          lastProcessedEventIndex.current = -1 // Reset event tracking
           clearEvents()
           break
         }
       }
     })
+    
+    // Update the last processed index to the last event we just handled
+    if (newEvents.length > 0) {
+      lastProcessedEventIndex.current = events.length - 1
+    }
   }, [events, useRealtime, clearEvents])
 
   const handleSendMessage = async (content: string) => {
@@ -159,7 +172,7 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
           messageId: (Date.now() + 1).toString(), // +1 to be different from user message ID
         }
         
-        const success = sendWsMessage(content, undefined, true) // Clear events for each new message
+        const success = sendWsMessage(content, selectedModel || undefined, true) // Pass selectedModel for realtime
         if (!success) {
           // If sending failed, throw an error to be caught by the catch block
           throw new Error('WebSocket not connected')

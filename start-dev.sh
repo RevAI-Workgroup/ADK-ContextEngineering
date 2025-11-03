@@ -2,7 +2,7 @@
 # Development server startup script for Unix systems (macOS/Linux)
 # Starts both backend and frontend, handles graceful shutdown
 
-set -e
+set -eo pipefail
 
 cd "$(dirname "$0")" || exit 1
 

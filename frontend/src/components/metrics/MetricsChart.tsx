@@ -14,7 +14,7 @@ import { PhaseMetrics } from '../../types/metrics.types'
 
 interface MetricsChartProps {
   phases: PhaseMetrics[]
-  metric: keyof PhaseMetrics['metrics']
+  metric: keyof Required<PhaseMetrics>['metrics']
   title: string
   description?: string
   type?: 'line' | 'bar'
@@ -30,7 +30,7 @@ export function MetricsChart({
   // Transform data for recharts
   const data = phases.map((phase) => ({
     name: phase.id,
-    value: phase.metrics[metric as keyof typeof phase.metrics] || 0,
+    value: phase.metrics[metric] ?? 0,
   }))
 
   const Chart = type === 'line' ? LineChart : BarChart

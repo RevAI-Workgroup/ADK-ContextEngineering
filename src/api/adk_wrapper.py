@@ -150,6 +150,9 @@ class ADKAgentWrapper:
             # Get the appropriate runner for the specified model
             runner = self._get_or_create_runner(model)
             
+            # Track the resolved model (use "default" if model is None)
+            resolved_model = model if model else "default"
+            
             # Generate unique IDs if needed
             if not session_id:
                 session_id = f"session-{uuid.uuid4().hex[:8]}"
@@ -205,7 +208,8 @@ class ADKAgentWrapper:
             response_data = {
                 "response": response_text,
                 "thinking_steps": thinking_steps if include_thinking else None,
-                "tool_calls": tool_calls if tool_calls else None
+                "tool_calls": tool_calls if tool_calls else None,
+                "model": resolved_model
             }
             
             # Calculate metrics
@@ -327,6 +331,9 @@ class ADKAgentWrapper:
             # Get the appropriate runner for the specified model
             runner = self._get_or_create_runner(model)
             
+            # Track the resolved model (use "default" if model is None)
+            resolved_model = model if model else "default"
+            
             # Generate unique IDs if needed
             if not session_id:
                 session_id = f"session-{uuid.uuid4().hex[:8]}"
@@ -407,7 +414,8 @@ class ADKAgentWrapper:
                 "data": {
                     "response": response_text,
                     "thinking_steps": thinking_steps,
-                    "tool_calls": tool_calls
+                    "tool_calls": tool_calls,
+                    "model": resolved_model
                 }
             }
             

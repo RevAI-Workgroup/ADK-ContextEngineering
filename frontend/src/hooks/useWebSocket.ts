@@ -153,14 +153,16 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
 
   const sendMessage = useCallback((
     message: string, 
-    sessionId?: string, 
-    clearEvents?: boolean
+    model?: string,
+    clearEvents?: boolean,
+    sessionId?: string
   ): boolean => {
     if (ws.current && ws.current.readyState === WebSocket.OPEN) {
       const payload = {
         type: 'message',
         message,
         session_id: sessionId,
+        selectedModel: model,
       }
       ws.current.send(JSON.stringify(payload))
       
