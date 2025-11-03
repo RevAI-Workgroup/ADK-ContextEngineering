@@ -89,7 +89,9 @@ async def chat(
     This endpoint provides synchronous chat interaction.
     For real-time streaming, use the WebSocket endpoint /api/chat/ws
     """
-    logger.info(f"Received chat message (model: {message.model or 'default'}): {message.message[:50]}...")
+    logger.debug(
+        "Received chat message for model %s", message.model or "default"
+    )
     
     try:
         # Process message through ADK agent with specified model
