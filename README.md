@@ -11,17 +11,27 @@ This project implements a comprehensive exploration of context engineering throu
 
 ## 🚀 Technology Stack
 
+### Backend
 - **LLM Framework**: Google ADK v1.17.0 (Agentic Development Kit)
 - **Local LLM**: Ollama with Qwen3 4B (2.5 GB)
 - **Model Integration**: LiteLLM v1.72.6
+- **API Framework**: FastAPI + Uvicorn with WebSocket support
 - **Vector Database**: ChromaDB (local, persistent) - Phase 2+
 - **Embeddings**: sentence-transformers (local) - Phase 2+
-- **Testing**: ADK's built-in `adk web` and `adk run`
 - **Language**: Python 3.11+
+
+### Frontend (Phase 1.5+)
+- **Framework**: React 18 + TypeScript
+- **Build Tool**: Vite
+- **UI Library**: Shadcn/UI (built on Tailwind CSS)
+- **Agent Protocol**: AG-UI (CopilotKit)
+- **Charts**: Recharts
+- **HTTP Client**: Axios
+- **Routing**: React Router
 
 ## 📊 Project Status
 
-**Current Phase**: Phase 1 - MVP Agent with Google ADK ✅ **COMPLETE**
+**Current Phase**: Phase 1.5 - Web UI Development ✅ **COMPLETE**
 
 ### Phase 0 Baseline Metrics
 
@@ -39,6 +49,7 @@ This project implements a comprehensive exploration of context engineering throu
 
 - ✅ **Phase 0**: Foundation & Benchmarking (Complete)
 - ✅ **Phase 1**: MVP Agent with Google ADK (Complete)
+- ✅ **Phase 1.5**: Web UI Development (Complete)
 - ⏳ **Phase 2**: Basic RAG Implementation (Next - Context Engineering Begins!)
 - ⏳ **Phase 3**: Advanced Retrieval Techniques
 - ⏳ **Phase 4**: Memory & State Management
@@ -50,21 +61,31 @@ This project implements a comprehensive exploration of context engineering throu
 
 ```
 context-engineering-sandbox/
-├── src/
-│   ├── core/              # Core configuration and utilities
-│   ├── evaluation/        # Metrics and benchmarking framework
-│   ├── retrieval/         # Vector search and RAG (Phase 2+)
-│   ├── memory/            # Conversation memory (Phase 4+)
-│   ├── compression/       # Context compression (Phase 5+)
-│   ├── advanced/          # Graph RAG, routing (Phase 6+)
-│   └── api/               # FastAPI endpoints (Phase 1+)
-├── configs/               # YAML configuration files
+├── frontend/              # Phase 1.5: React Web UI
+│   ├── src/
+│   │   ├── components/   # React components (UI, chat, metrics)
+│   │   ├── pages/        # Route pages
+│   │   ├── hooks/        # Custom React hooks
+│   │   ├── services/     # API services
+│   │   └── types/        # TypeScript types
+│   └── public/           # Static assets
+├── src/                   # Backend Python source
+│   ├── core/             # Core configuration and utilities
+│   ├── evaluation/       # Metrics and benchmarking framework
+│   ├── retrieval/        # Vector search and RAG (Phase 2+)
+│   ├── memory/           # Conversation memory (Phase 4+)
+│   ├── compression/      # Context compression (Phase 5+)
+│   ├── advanced/         # Graph RAG, routing (Phase 6+)
+│   └── api/              # FastAPI endpoints (Phase 1.5+)
+├── context_engineering_agent/  # ADK agent directory
+├── configs/              # YAML configuration files
 ├── data/
-│   ├── test_sets/         # Benchmark datasets
-│   └── knowledge_base/    # Documents for RAG
-├── scripts/               # Utility scripts
-├── docs/                  # Documentation
-└── tests/                 # Test suites
+│   ├── test_sets/        # Benchmark datasets
+│   └── knowledge_base/   # Documents for RAG
+├── docker/               # Docker configuration
+├── scripts/              # Utility scripts
+├── docs/                 # Documentation
+└── tests/                # Test suites
 ```
 
 ## 🚀 Quick Start
@@ -115,28 +136,46 @@ ollama pull qwen3:4b
 ollama list
 ```
 
-### 4. Test the Agent
+### 4. Run the Application
 
-**Interactive Mode (Recommended):**
+**Option A: Docker (Recommended - Full Stack):**
 ```bash
+# Build and run both frontend and backend
+docker-compose -f docker/docker-compose.yml up --build
+
+# Access the web UI at http://localhost
+```
+
+**Option B: Development Mode (Backend + Frontend):**
+
+Terminal 1 - Backend:
+```bash
+# Start FastAPI backend
+uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+Terminal 2 - Frontend:
+```bash
+# Install frontend dependencies (first time only)
+cd frontend
+npm install
+
+# Start frontend dev server
+npm run dev
+
+# Access the web UI at http://localhost:5173
+```
+
+**Option C: CLI Only (No Web UI):**
+```bash
+# Interactive mode
 adk run context_engineering_agent
-# Type your queries interactively
-# Examples:
-#   "What is 15 multiplied by 7?"
-#   "Count words in: The quick brown fox"
-#   "What time is it in Asia/Tokyo?"
-# Type "exit" to quit
-```
 
-**Quick Test (Single Query):**
-```bash
+# Single query
 echo "What is 5 plus 3?" | adk run context_engineering_agent
-```
 
-**Web Interface:**
-```bash
+# ADK's built-in web interface
 adk web
-# Opens browser interface for testing the agent
 ```
 
 ### 5. Run Tests (Optional)
@@ -216,6 +255,27 @@ Phase 1 integrates Google ADK with Ollama backend:
 - **Skipped**: Custom FastAPI (use ADK's built-in `adk web` and `adk run`)
 - **Deferred**: Web search to Phase 3 (external context retrieval)
 
+## 🎨 Phase 1.5: Web UI Development ✅ COMPLETE
+
+Phase 1.5 delivers a modern React frontend with AG-UI integration:
+
+### ✅ Completed
+- **Frontend**: React 18 + TypeScript with Vite
+- **UI Framework**: Shadcn/UI components on Tailwind CSS
+- **AG-UI Protocol**: CopilotKit integration for agent-user interaction
+- **Real-time Communication**: WebSocket support for streaming responses
+- **Pages**: Home, Chat, Metrics dashboard with charts
+- **Backend API**: FastAPI with WebSocket endpoints
+- **Docker**: Multi-container setup with Nginx reverse proxy
+- **Documentation**: Comprehensive [Phase 1.5 Summary](docs/phase_summaries/phase1_5_summary.md)
+
+### 🎯 Key Features
+- Interactive chat interface with thinking visualization
+- Real-time metrics dashboard with phase comparisons
+- Tool call display and agent reasoning transparency
+- Responsive design with dark mode support
+- WebSocket streaming for live agent updates
+
 ## 🔮 Next Steps: Phase 2 - RAG Implementation
 
 **This is where context engineering truly begins!**
@@ -224,6 +284,7 @@ Phase 2 will add the critical RAG retrieval tool:
 - Set up ChromaDB vector database
 - Create RAG retrieval tool
 - Implement document ingestion pipeline
+- Add document upload UI in frontend
 - Integrate RAG with agent
 - **Measure context engineering gains**: First meaningful metrics improvement!
 
@@ -328,4 +389,4 @@ ls context_engineering_agent/  # Should show agent.py and __init__.py
 
 **Note**: This project uses local models for zero-cost experimentation. All metrics are reproducible on consumer hardware.
 
-*Last Updated: Phase 1 Complete - 2025-10-27*
+*Last Updated: Phase 1.5 Complete - 2025-10-31*

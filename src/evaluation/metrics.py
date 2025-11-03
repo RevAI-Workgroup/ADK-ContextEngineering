@@ -359,4 +359,165 @@ class MetricsCollector:
         """
         # This can be extended to log to various backends
         print(f"[METRICS] {json.dumps(data)}")
-
+    
+    def collect_response_metrics(self, response_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Collect metrics from an agent response for API endpoints.
+        
+        Args:
+            response_data: Response data from agent
+            
+        Returns:
+            Dictionary of metrics
+        """
+        metrics = response_data.get("metrics", {}).copy()
+        
+        # Add token counts if available
+        response = response_data.get("response", "")
+        if response:
+            metrics["token_count"] = self.count_tokens(response)
+        
+        return metrics
+    
+    def get_all_metrics(self) -> Dict[str, Any]:
+        """
+        Get all collected metrics from all phases.
+        
+        Returns:
+            Dictionary containing metrics from all phases
+        """
+        metrics = {}
+        
+        # Load Phase 0 metrics if available
+        phase0_path = Path("docs/phase_summaries/phase0_baseline_results.json")
+        if phase0_path.exists():
+            try:
+                with open(phase0_path, 'r', encoding='utf-8') as f:
+                    metrics["phase0"] = json.load(f)
+            except (json.JSONDecodeError, IOError) as e:
+                print(f"Warning: Failed to load phase0 metrics: {e}")
+        
+        # Add current evaluation results
+        if self.results:
+            metrics["current"] = {
+                "summary": self.get_aggregate_metrics(),
+                "count": len(self.results)
+            }
+        
+        return metrics
+    
+    def get_phase_metrics(self, phase_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get metrics for a specific phase.
+        
+        Args:
+            phase_id: Phase identifier (e.g., "phase0", "phase1")
+            
+        Returns:
+            Dictionary containing phase metrics or None if not found
+        """
+        # Validate phase_id to prevent path traversal
+        if not re.match(r'^[a-zA-Z0-9_]+$', phase_id) and phase_id != "current":
+            return None
+        
+        # Try to load from phase summary files
+        phase_path = Path(f"docs/phase_summaries/{phase_id}_baseline_results.json")
+        if not phase_path.exists():
+            phase_path = Path(f"docs/phase_summaries/{phase_id}_results.json")
+        
+        if phase_path.exists():
+            try:
+                with open(phase_path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, IOError) as e:
+                print(f"Warning: Failed to load metrics for {phase_id}: {e}")
+                return None
+        
+        # Return current results if requesting current phase
+        if phase_id == "current" and self.results:
+            return {
+                "summary": self.get_aggregate_metrics(),
+                "count": len(self.results),
+                "results": [r.to_dict() for r in self.results]
+            }
+        
+        return None
+    
+    def get_metrics_comparison(self) -> Dict[str, Any]:
+        """
+        Generate a comparison of metrics across phases.
+        
+        Returns:
+            Dictionary with comparison data showing improvements/degradations
+        """
+        comparison = {
+            "phases": [],
+            "metrics": {},
+            "improvements": {}
+        }
+        
+        # Collect all available phase metrics
+        # Match both phase*_results.json and phase*_baseline_results.json
+        phase_files = list(Path("docs/phase_summaries").glob("phase*_results.json")) + \
+                      list(Path("docs/phase_summaries").glob("phase*_baseline_results.json"))
+        
+        # Deduplicate files by keeping only unique phase IDs
+        seen_phases = set()
+        unique_phase_files = []
+        for phase_file in sorted(phase_files):
+            phase_id = phase_file.stem.replace("_baseline_results", "").replace("_results", "")
+            if phase_id not in seen_phases:
+                seen_phases.add(phase_id)
+                unique_phase_files.append(phase_file)
+        
+        for phase_file in unique_phase_files:
+            phase_id = phase_file.stem.replace("_baseline_results", "").replace("_results", "")
+            
+            try:
+                with open(phase_file, 'r', encoding='utf-8') as f:
+                    phase_data = json.load(f)
+                    # Handle both "summary" and "aggregate_metrics" keys
+                    metrics = phase_data.get("summary", phase_data.get("aggregate_metrics", {}))
+                    comparison["phases"].append({
+                        "id": phase_id,
+                        "metrics": metrics
+                    })
+            except Exception as e:
+                print(f"Error loading {phase_file}: {e}")
+        
+        # Add current metrics if available
+        if self.results:
+            comparison["phases"].append({
+                "id": "current",
+                "metrics": self.get_aggregate_metrics()
+            })
+        
+        # Calculate improvements
+        if len(comparison["phases"]) > 1:
+            baseline = comparison["phases"][0]["metrics"]
+            latest = comparison["phases"][-1]["metrics"]
+            # Metrics where lower is better
+            lower_is_better = {'hallucination_rate', 'latency_ms_mean'}
+            
+            for metric_name in baseline:
+                if metric_name in latest:
+                    baseline_val = baseline[metric_name]
+                    latest_val = latest[metric_name]
+                    
+                    # Type safety check
+                    if isinstance(baseline_val, (int, float)) and isinstance(latest_val, (int, float)) and baseline_val != 0:
+                        change_pct = ((latest_val - baseline_val) / baseline_val) * 100
+                        
+                        # Invert for metrics where lower is better
+                        if any(m in metric_name for m in lower_is_better):
+                            improvement_pct = -change_pct
+                        else:
+                            improvement_pct = change_pct
+                        
+                        comparison["improvements"][metric_name] = {
+                            "baseline": baseline_val,
+                            "latest": latest_val,
+                            "improvement_pct": improvement_pct
+                        }
+        
+        return comparison
