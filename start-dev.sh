@@ -27,6 +27,8 @@ log() {
 }
 
 cleanup() {
+    local exit_code=${1:-$?}
+    trap - SIGINT SIGTERM EXIT
     log "SYSTEM" "Shutting down servers..." "$YELLOW"
     
     if [ ! -z "$BACKEND_PID" ]; then
@@ -50,11 +52,11 @@ cleanup() {
     fi
     
     log "SYSTEM" "All servers stopped" "$YELLOW"
-    exit 0
+    exit "$exit_code"
 }
 
 # Set up signal handlers
-trap cleanup SIGINT SIGTERM EXIT
+trap 'cleanup $?' SIGINT SIGTERM EXIT
 
 # Print header
 echo -e "\n${CYAN}${BOLD}╔═══════════════════════════════════════════╗${NC}"
