@@ -8,7 +8,6 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  Legend,
   ResponsiveContainer,
 } from 'recharts'
 import { PhaseMetrics } from '../../types/metrics.types'
@@ -49,7 +48,6 @@ export function MetricsChart({
             <XAxis dataKey="name" />
             <YAxis />
             <Tooltip />
-            <Legend />
             {type === 'line' ? (
               <Line type="monotone" dataKey="value" stroke="#3b82f6" strokeWidth={2} />
             ) : (

@@ -9,6 +9,7 @@ export const agentService = {
     message: string,
     sessionId?: string,
     includeThinking: boolean = true,
+    model?: string | null,
     signal?: AbortSignal
   ): Promise<AgentResponse> {
     const response = await api.post<AgentResponse>(
@@ -17,6 +18,7 @@ export const agentService = {
         message,
         session_id: sessionId,
         include_thinking: includeThinking,
+        model: model || undefined,
       },
       {
         signal,

@@ -1,7 +1,19 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card'
 import { LucideIcon } from 'lucide-react'
-import { formatNumber } from '../../lib/utils'
 import { cn } from '@/lib/utils'
+
+/**
+ * Formats numbers with thousands separators and up to 2 decimals.
+ * Falls back to string if invalid.
+ * @param value number to format
+ */
+function formatNumber(value: number): string {
+  if (typeof value !== 'number' || isNaN(value)) return String(value)
+  return value.toLocaleString(undefined, {
+    maximumFractionDigits: 2,
+    minimumFractionDigits: 0,
+  })
+}
 
 interface MetricsCardProps {
   title: string

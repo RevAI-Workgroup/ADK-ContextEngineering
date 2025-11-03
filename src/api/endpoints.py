@@ -8,6 +8,10 @@ from typing import List, Dict, Any, Optional
 import json
 import logging
 from datetime import datetime, timezone
+import httpx
+import subprocess
+import platform
+import shutil
 
 from src.api.adk_wrapper import ADKAgentWrapper
 from src.evaluation.metrics import MetricsCollector
@@ -18,6 +22,7 @@ logger = logging.getLogger(__name__)
 chat_router = APIRouter()
 metrics_router = APIRouter()
 tools_router = APIRouter()
+models_router = APIRouter()
 
 
 # ============================================================================
@@ -48,6 +53,7 @@ class ChatMessage(BaseModel):
     message: str = Field(..., description="User's message to the agent")
     session_id: Optional[str] = Field(None, description="Session ID for conversation tracking")
     include_thinking: bool = Field(True, description="Include agent thinking process in response")
+    model: Optional[str] = Field(None, description="LLM model to use for this message")
 
 
 class ChatResponse(BaseModel):
@@ -57,6 +63,7 @@ class ChatResponse(BaseModel):
     tool_calls: Optional[List[Dict[str, Any]]] = Field(None, description="Tools called by agent")
     metrics: Optional[Dict[str, Any]] = Field(None, description="Response metrics")
     timestamp: str = Field(..., description="Response timestamp")
+    model: Optional[str] = Field(None, description="Model used for this response")
 
 
 class ToolInfo(BaseModel):
@@ -82,14 +89,15 @@ async def chat(
     This endpoint provides synchronous chat interaction.
     For real-time streaming, use the WebSocket endpoint /api/chat/ws
     """
-    logger.info(f"Received chat message: {message.message[:50]}...")
+    logger.info(f"Received chat message (model: {message.model or 'default'}): {message.message[:50]}...")
     
     try:
-        # Process message through ADK agent
+        # Process message through ADK agent with specified model
         result = await adk_wrapper.process_message(
             message=message.message,
             session_id=message.session_id,
-            include_thinking=message.include_thinking
+            include_thinking=message.include_thinking,
+            model=message.model
         )
         
         # Collect metrics
@@ -100,7 +108,8 @@ async def chat(
             thinking_steps=result.get("thinking_steps"),
             tool_calls=result.get("tool_calls"),
             metrics=metrics,
-            timestamp=datetime.now(timezone.utc).isoformat()
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            model=message.model  # Include the model used in the response
         )
         
     except Exception as e:
@@ -315,5 +324,224 @@ async def get_tool_info(
         raise
     except Exception as e:
         logger.error(f"Error fetching tool info: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# MODELS ENDPOINTS
+# ============================================================================
+
+class OllamaModel(BaseModel):
+    """Ollama model information."""
+    name: str = Field(..., description="Model name")
+    modified_at: str = Field(..., description="Last modified timestamp")
+    size: int = Field(..., description="Model size in bytes")
+    digest: Optional[str] = Field(None, description="Model digest/hash")
+
+
+class RunningModel(BaseModel):
+    """Information about a running Ollama model."""
+    name: str = Field(..., description="Model name")
+    size: int = Field(..., description="Model size in bytes")
+    size_vram: int = Field(..., description="VRAM usage in bytes")
+
+
+class ClearModelsResponse(BaseModel):
+    """Response from clearing models operation."""
+    success: bool = Field(..., description="Whether the operation succeeded")
+    models_stopped: List[str] = Field(..., description="List of models that were stopped")
+    message: str = Field(..., description="Status message")
+
+
+@models_router.get("/models", response_model=List[OllamaModel])
+async def get_ollama_models():
+    """
+    Get list of locally installed Ollama models.
+    
+    Connects to local Ollama instance and retrieves available models.
+    """
+    try:
+        # Connect to local Ollama API
+        async with httpx.AsyncClient() as client:
+            response = await client.get("http://localhost:11434/api/tags", timeout=5.0)
+            response.raise_for_status()
+            
+            data = response.json()
+            models = data.get("models", [])
+            
+            # Transform Ollama API response to our model format
+            return [
+                OllamaModel(
+                    name=model.get("name", "unknown"),
+                    modified_at=model.get("modified_at", ""),
+                    size=model.get("size", 0),
+                    digest=model.get("digest")
+                )
+                for model in models
+            ]
+            
+    except httpx.ConnectError:
+        logger.error("Cannot connect to Ollama. Make sure Ollama is running on localhost:11434")
+        raise HTTPException(
+            status_code=503, 
+            detail="Cannot connect to Ollama. Please ensure Ollama is running."
+        )
+    except httpx.TimeoutException:
+        logger.error("Timeout connecting to Ollama")
+        raise HTTPException(
+            status_code=504,
+            detail="Timeout connecting to Ollama service."
+        )
+    except Exception as e:
+        logger.error(f"Error fetching Ollama models: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@models_router.get("/models/running", response_model=List[RunningModel])
+async def get_running_models():
+    """
+    Get list of currently running (loaded in memory) Ollama models.
+    
+    Equivalent to 'ollama ps' command.
+    """
+    try:
+        # Try using Ollama API first
+        async with httpx.AsyncClient() as client:
+            response = await client.get("http://localhost:11434/api/ps", timeout=5.0)
+            response.raise_for_status()
+            
+            data = response.json()
+            models = data.get("models", [])
+            
+            return [
+                RunningModel(
+                    name=model.get("name", "unknown"),
+                    size=model.get("size", 0),
+                    size_vram=model.get("size_vram", 0)
+                )
+                for model in models
+            ]
+            
+    except httpx.ConnectError:
+        logger.error("Cannot connect to Ollama")
+        raise HTTPException(
+            status_code=503,
+            detail="Cannot connect to Ollama. Please ensure Ollama is running."
+        )
+    except Exception as e:
+        logger.error(f"Error fetching running models: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@models_router.post("/models/clear", response_model=ClearModelsResponse)
+async def clear_running_models():
+    """
+    Stop all currently running Ollama models to free up memory.
+    
+    This endpoint is system-agnostic and works on Windows, macOS, and Linux.
+    """
+    try:
+        # First, get list of running models
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.get("http://localhost:11434/api/ps", timeout=5.0)
+                response.raise_for_status()
+                data = response.json()
+                running_models = [model.get("name") for model in data.get("models", [])]
+            except httpx.ConnectError:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Cannot connect to Ollama. Please ensure Ollama is running."
+                )
+        
+        if not running_models:
+            return ClearModelsResponse(
+                success=True,
+                models_stopped=[],
+                message="No models are currently running"
+            )
+        
+        logger.info(f"Attempting to stop {len(running_models)} running models: {running_models}")
+        
+        # Find ollama executable (system-agnostic)
+        ollama_cmd = shutil.which("ollama")
+        if not ollama_cmd:
+            # Try common installation paths
+            system = platform.system()
+            if system == "Windows":
+                possible_paths = [
+                    "C:\\Program Files\\Ollama\\ollama.exe",
+                    "C:\\Program Files (x86)\\Ollama\\ollama.exe",
+                ]
+            elif system == "Darwin":  # macOS
+                possible_paths = [
+                    "/usr/local/bin/ollama",
+                    "/opt/homebrew/bin/ollama",
+                ]
+            else:  # Linux
+                possible_paths = [
+                    "/usr/local/bin/ollama",
+                    "/usr/bin/ollama",
+                ]
+            
+            for path in possible_paths:
+                if shutil.which(path):
+                    ollama_cmd = path
+                    break
+        
+        if not ollama_cmd:
+            raise HTTPException(
+                status_code=500,
+                detail="Could not find ollama executable. Please ensure Ollama is installed."
+            )
+        
+        # Stop each running model
+        stopped_models = []
+        failed_models = []
+        
+        for model_name in running_models:
+            try:
+                logger.info(f"Stopping model: {model_name}")
+                
+                # Use subprocess to run 'ollama stop <model>'
+                # This works cross-platform
+                process = subprocess.run(
+                    [ollama_cmd, "stop", model_name],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    check=False
+                )
+                
+                if process.returncode == 0:
+                    stopped_models.append(model_name)
+                    logger.info(f"Successfully stopped model: {model_name}")
+                else:
+                    logger.warning(f"Failed to stop model {model_name}: {process.stderr}")
+                    failed_models.append(model_name)
+                    
+            except subprocess.TimeoutExpired:
+                logger.error(f"Timeout while stopping model: {model_name}")
+                failed_models.append(model_name)
+            except Exception as e:
+                logger.error(f"Error stopping model {model_name}: {e}")
+                failed_models.append(model_name)
+        
+        # Prepare response message
+        if failed_models:
+            message = f"Stopped {len(stopped_models)} model(s). Failed to stop: {', '.join(failed_models)}"
+        else:
+            message = f"Successfully stopped {len(stopped_models)} model(s)"
+        
+        return ClearModelsResponse(
+            success=len(failed_models) == 0,
+            models_stopped=stopped_models,
+            message=message
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error clearing models: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 

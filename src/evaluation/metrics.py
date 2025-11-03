@@ -457,17 +457,30 @@ class MetricsCollector:
         }
         
         # Collect all available phase metrics
-        phase_files = Path("docs/phase_summaries").glob("phase*_results.json")
+        # Match both phase*_results.json and phase*_baseline_results.json
+        phase_files = list(Path("docs/phase_summaries").glob("phase*_results.json")) + \
+                      list(Path("docs/phase_summaries").glob("phase*_baseline_results.json"))
         
+        # Deduplicate files by keeping only unique phase IDs
+        seen_phases = set()
+        unique_phase_files = []
         for phase_file in sorted(phase_files):
+            phase_id = phase_file.stem.replace("_baseline_results", "").replace("_results", "")
+            if phase_id not in seen_phases:
+                seen_phases.add(phase_id)
+                unique_phase_files.append(phase_file)
+        
+        for phase_file in unique_phase_files:
             phase_id = phase_file.stem.replace("_baseline_results", "").replace("_results", "")
             
             try:
                 with open(phase_file, 'r', encoding='utf-8') as f:
                     phase_data = json.load(f)
+                    # Handle both "summary" and "aggregate_metrics" keys
+                    metrics = phase_data.get("summary", phase_data.get("aggregate_metrics", {}))
                     comparison["phases"].append({
                         "id": phase_id,
-                        "metrics": phase_data.get("summary", {})
+                        "metrics": metrics
                     })
             except Exception as e:
                 print(f"Error loading {phase_file}: {e}")

@@ -1,20 +1,22 @@
-import { useState, useEffect, useRef } from 'react'
+import { useEffect, useRef } from 'react'
 import { Card } from '../ui/card'
+import { Alert, AlertDescription } from '../ui/alert'
+import { Button } from '../ui/button'
+import { X, AlertCircle } from 'lucide-react'
 import { ChatInput } from './ChatInput'
 import { ChatMessage } from './ChatMessage'
 import { Message } from '../../types/message.types'
 import { ToolCall } from '../../types/agent.types'
 import { useWebSocket } from '../../hooks/useWebSocket'
 import { useAgent } from '../../hooks/useAgent'
+import { useChatContext } from '../../contexts/ChatContext'
 
 interface ChatInterfaceProps {
   useRealtime?: boolean
 }
 
 export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
-  const [messages, setMessages] = useState<Message[]>([])
-  const [isProcessing, setIsProcessing] = useState(false)
-  const [errorMessage, setErrorMessage] = useState<string>('')
+  const { messages, setMessages, isProcessing, setIsProcessing, errorMessage, setErrorMessage, selectedModel } = useChatContext()
 
   // WebSocket for real-time streaming
   const { isConnected, events, connect, sendMessage: sendWsMessage, clearEvents } = useWebSocket()
@@ -165,7 +167,7 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
         // Note: isProcessing will be set to false in the useEffect when 'complete' event is received
       } else {
         // Use HTTP for synchronous request
-        const response = await sendHttpMessage(content)
+        const response = await sendHttpMessage(content, undefined, true, selectedModel)
 
         const assistantMessage: Message = {
           id: Date.now().toString(),
@@ -174,6 +176,7 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
           thinking: response.thinking_steps,
           toolCalls: response.tool_calls,
           timestamp: response.timestamp,
+          model: response.model,
         }
 
         setMessages((prev) => [...prev, assistantMessage])
@@ -227,22 +230,24 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
   }
 
   return (
-    <div className="flex flex-col h-[calc(100vh-12rem)] gap-4">
+    <div className="flex flex-col h-[500px] w-full max-w-4xl gap-4">
       {/* Error Banner */}
       {errorMessage && (
-        <div className="bg-destructive/15 border border-destructive/50 rounded-lg p-3 flex items-start gap-2">
-          <span className="text-destructive text-sm font-medium">⚠️</span>
-          <div className="flex-1">
-            <p className="text-sm text-destructive font-medium">{errorMessage}</p>
-          </div>
-          <button
-            onClick={() => setErrorMessage('')}
-            className="text-destructive/70 hover:text-destructive text-sm"
-            aria-label="Dismiss error"
-          >
-            ✕
-          </button>
-        </div>
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription className="flex items-center justify-between">
+            <span>{errorMessage}</span>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6 -mr-2"
+              onClick={() => setErrorMessage('')}
+              aria-label="Dismiss error"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </AlertDescription>
+        </Alert>
       )}
       
       {/* Custom Chat Display */}

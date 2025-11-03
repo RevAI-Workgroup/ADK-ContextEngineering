@@ -18,6 +18,7 @@ export interface AgentResponse {
   tool_calls?: ToolCall[]
   metrics?: ResponseMetrics
   timestamp: string
+  model?: string
 }
 
 export interface ResponseMetrics {

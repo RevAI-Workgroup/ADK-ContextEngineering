@@ -1,9 +1,10 @@
 import { Message } from '../../types/message.types'
 import { Card, CardContent } from '../ui/card'
-import { User, Bot, Clock } from 'lucide-react'
-import { cn, formatTimestamp } from '@/lib/utils'
+import { User, Bot, Clock, Cpu } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import { ThinkingDisplay } from './ThinkingDisplay'
 import { ToolOutputDisplay } from './ToolOutputDisplay'
+import { Badge } from '../ui/badge'
 
 interface ChatMessageProps {
   message: Message
@@ -31,15 +32,25 @@ export function ChatMessage({ message }: ChatMessageProps) {
           <CardContent className="p-3">
             <p className="text-sm whitespace-pre-wrap">{message.content}</p>
 
-            {/* Timestamp */}
+            {/* Timestamp and Model Info */}
             <div
               className={cn(
-                'mt-2 flex items-center gap-1 text-xs',
+                'mt-2 flex items-center gap-3 text-xs',
                 isUser ? 'text-primary-foreground/70' : 'text-muted-foreground'
               )}
             >
-              <Clock className="h-3 w-3" />
-              <span>{formatTimestamp(message.timestamp)}</span>
+              <div className="flex items-center gap-1">
+                <Clock className="h-3 w-3" />
+                <span>
+                  {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </span>
+              </div>
+              {!isUser && message.model && (
+                <Badge variant="secondary" className="flex items-center gap-1 text-xs h-5 px-2">
+                  <Cpu className="h-3 w-3" />
+                  {message.model}
+                </Badge>
+              )}
             </div>
           </CardContent>
         </Card>

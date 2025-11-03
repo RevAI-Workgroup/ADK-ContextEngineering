@@ -9,6 +9,7 @@ export interface Message {
   thinking?: string[]
   toolCalls?: ToolCall[]
   timestamp: string
+  model?: string
 }
 
 // Data interfaces for each event type

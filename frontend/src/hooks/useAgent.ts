@@ -12,7 +12,7 @@ export function useAgent() {
   const requestIdRef = useRef(0)
 
   const sendMessage = useCallback(
-    async (message: string, sessionId?: string, includeThinking: boolean = true) => {
+    async (message: string, sessionId?: string, includeThinking: boolean = true, model?: string | null) => {
       // Cancel previous request if still pending
       if (abortControllerRef.current) {
         abortControllerRef.current.abort()
@@ -34,6 +34,7 @@ export function useAgent() {
           message,
           sessionId,
           includeThinking,
+          model,
           abortController.signal
         )
         

@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse
 import logging
 from datetime import datetime
 
-from src.api.endpoints import chat_router, metrics_router, tools_router
+from src.api.endpoints import chat_router, metrics_router, tools_router, models_router
 from src.api.adk_wrapper import ADKAgentWrapper
 from src.evaluation.metrics import MetricsCollector
 
@@ -94,6 +94,7 @@ async def health_check():
 app.include_router(chat_router, prefix="/api", tags=["chat"])
 app.include_router(metrics_router, prefix="/api", tags=["metrics"])
 app.include_router(tools_router, prefix="/api", tags=["tools"])
+app.include_router(models_router, prefix="/api", tags=["models"])
 
 
 # Global exception handler

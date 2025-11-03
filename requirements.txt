@@ -40,6 +40,7 @@ pytest-benchmark==5.1.0
 # Utilities
 pyyaml==6.0.2
 requests>=2.32.4
+httpx>=0.27.0
 aiohttp==3.11.10
 tqdm==4.67.1
 websockets>=12.0

@@ -13,10 +13,13 @@ import uuid
 from typing import Dict, Any, List, AsyncGenerator, Optional
 from datetime import datetime
 
-from context_engineering_agent.agent import root_agent
+from context_engineering_agent.agent import root_agent, TOOLS, INSTRUCTION
+from google.adk.agents import Agent
+from google.adk.models.lite_llm import LiteLlm
 from google.adk import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
+from src.core.config import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -26,10 +29,12 @@ class ADKAgentWrapper:
     Wrapper for the ADK agent to provide API-friendly interfaces.
     
     Provides both synchronous and streaming methods for agent interaction.
+    Supports dynamic model switching with agent caching.
     """
     
     def __init__(self):
-        """Initialize the ADK agent wrapper."""
+        """Initialize the ADK agent wrapper with model caching."""
+        # Default agent and runner (for backward compatibility)
         self.agent = root_agent
         self.session_service = InMemorySessionService()
         self.runner = Runner(
@@ -37,14 +42,94 @@ class ADKAgentWrapper:
             app_name='agents',
             session_service=self.session_service
         )
+        
+        # Agent cache for different models
+        self._agent_cache: Dict[str, Agent] = {
+            "default": root_agent
+        }
+        self._runner_cache: Dict[str, Runner] = {
+            "default": self.runner
+        }
+        
         self.sessions: Dict[str, Dict[str, Any]] = {}
-        logger.info("ADK Agent Wrapper initialized with Runner and InMemorySessionService")
+        
+        # Load config for model settings
+        try:
+            self.config = get_config()
+        except Exception as e:
+            logger.warning(f"Could not load config: {e}")
+            self.config = None
+        
+        logger.info("ADK Agent Wrapper initialized with dynamic model support")
+    
+    def _get_or_create_runner(self, model: Optional[str] = None) -> Runner:
+        """
+        Get or create a runner for the specified model.
+        
+        Args:
+            model: Model name (e.g., "qwen3:4b", "llama2:7b"). 
+                   If None, uses default model.
+        
+        Returns:
+            Runner instance configured for the specified model
+        """
+        # Use default if no model specified
+        if not model:
+            return self._runner_cache["default"]
+        
+        # Check cache
+        if model in self._runner_cache:
+            logger.info(f"Using cached runner for model: {model}")
+            return self._runner_cache[model]
+        
+        # Create new agent with specified model
+        logger.info(f"Creating new agent for model: {model}")
+        
+        # Get model config from config file or use defaults
+        temperature = 0.7
+        max_tokens = 4096
+        
+        if self.config:
+            temperature = self.config.get("models.ollama.primary_model.temperature", 0.7)
+            max_tokens = self.config.get("models.ollama.primary_model.max_tokens", 4096)
+        
+        # Create new agent with the specified model
+        new_agent = Agent(
+            name=f"context_engineering_agent_{model.replace(':', '_')}",
+            model=LiteLlm(
+                model=f"ollama_chat/{model}",
+                temperature=temperature,
+                max_tokens=max_tokens
+            ),
+            description=(
+                "An intelligent AI agent for answering questions and performing tasks "
+                "using available tools. Capable of mathematical calculations, text analysis, "
+                "and time zone queries."
+            ),
+            instruction=INSTRUCTION,
+            tools=TOOLS
+        )
+        
+        # Create runner for the new agent
+        new_runner = Runner(
+            agent=new_agent,
+            app_name='agents',
+            session_service=self.session_service
+        )
+        
+        # Cache the agent and runner
+        self._agent_cache[model] = new_agent
+        self._runner_cache[model] = new_runner
+        
+        logger.info(f"Successfully created and cached agent for model: {model}")
+        return new_runner
     
     async def process_message(
         self,
         message: str,
         session_id: Optional[str] = None,
-        include_thinking: bool = True
+        include_thinking: bool = True,
+        model: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Process a message through the ADK agent (synchronous).
@@ -53,14 +138,18 @@ class ADKAgentWrapper:
             message: User's message
             session_id: Optional session ID for conversation tracking
             include_thinking: Whether to include thinking steps
+            model: Optional model name to use (e.g., "qwen3:4b", "llama2:7b")
             
         Returns:
             Dictionary containing response, thinking steps, tool calls, and metrics
         """
-        logger.info(f"Processing message: {message[:50]}...")
+        logger.info(f"Processing message with model '{model or 'default'}': {message[:50]}...")
         start_time = time.time()
         
         try:
+            # Get the appropriate runner for the specified model
+            runner = self._get_or_create_runner(model)
+            
             # Generate unique IDs if needed
             if not session_id:
                 session_id = f"session-{uuid.uuid4().hex[:8]}"
@@ -77,7 +166,7 @@ class ADKAgentWrapper:
             
             # Use run_async since we're already in an async context
             # This avoids thread-safety issues with InMemorySessionService
-            events_list = await self._run_agent_async(user_id, session_id, content)
+            events_list = await self._run_agent_async(user_id, session_id, content, runner)
             
             logger.info(f"Received {len(events_list)} events from agent")
             
@@ -146,10 +235,16 @@ class ADKAgentWrapper:
             logger.error(f"Error processing message: {e}", exc_info=True)
             raise
     
-    async def _run_agent_async(self, user_id: str, session_id: str, content):
+    async def _run_agent_async(self, user_id: str, session_id: str, content, runner: Runner):
         """
         Helper method to run agent asynchronously using run_async.
         This avoids thread-safety issues with InMemorySessionService.
+        
+        Args:
+            user_id: User identifier
+            session_id: Session identifier
+            content: Message content
+            runner: Runner instance to use for this request
         """
         events_list = []
         try:
@@ -186,9 +281,9 @@ class ADKAgentWrapper:
                     logger.error(f"Failed to create session: {create_error}", exc_info=True)
                     raise
             
-            # Run the agent asynchronously
+            # Run the agent asynchronously using the provided runner
             logger.info(f"Starting async agent run for session {session_id} (created={session_created})")
-            async for event in self.runner.run_async(
+            async for event in runner.run_async(
                 user_id=user_id,
                 session_id=session_id,
                 new_message=content
@@ -207,7 +302,8 @@ class ADKAgentWrapper:
     async def process_message_stream(
         self,
         message: str,
-        session_id: Optional[str] = None
+        session_id: Optional[str] = None,
+        model: Optional[str] = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Process a message through the ADK agent with streaming updates.
@@ -220,13 +316,17 @@ class ADKAgentWrapper:
         Args:
             message: User's message
             session_id: Optional session ID
+            model: Optional model name to use (e.g., "qwen3:4b", "llama2:7b")
             
         Yields:
             Event dictionaries with type and data
         """
-        logger.info(f"Processing message with streaming: {message[:50]}...")
+        logger.info(f"Processing message with streaming (model: '{model or 'default'}'): {message[:50]}...")
         
         try:
+            # Get the appropriate runner for the specified model
+            runner = self._get_or_create_runner(model)
+            
             # Generate unique IDs if needed
             if not session_id:
                 session_id = f"session-{uuid.uuid4().hex[:8]}"
@@ -265,9 +365,9 @@ class ADKAgentWrapper:
                 parts=[types.Part(text=message)]
             )
             
-            # Run agent and stream events
+            # Run agent and stream events using the model-specific runner
             events = await asyncio.to_thread(
-                self.runner.run,
+                runner.run,
                 user_id=user_id,
                 session_id=session_id,
                 new_message=content

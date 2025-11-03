@@ -136,9 +136,9 @@ interface PhaseItemProps {
 
 function PhaseItem({ phase, title, status, description }: PhaseItemProps) {
   const statusColors = {
-    complete: 'bg-green-500',
-    current: 'bg-blue-500',
-    upcoming: 'bg-gray-300',
+    complete: 'bg-green-500 dark:bg-green-600',
+    current: 'bg-primary',
+    upcoming: 'bg-muted-foreground/30',
   }
 
   const statusLabels = {
