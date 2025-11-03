@@ -27,9 +27,8 @@ export interface ResponseEventData {
   tool_calls?: ToolCall[]
 }
 
-export interface CompleteEventData {
-  // Empty object for complete events
-}
+// Empty object for complete events
+export type CompleteEventData = Record<string, never>
 
 export interface ErrorEventData {
   error?: string
