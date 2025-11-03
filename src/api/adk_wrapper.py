@@ -94,8 +94,10 @@ class ADKAgentWrapper:
             max_tokens = self.config.get("models.ollama.primary_model.max_tokens", 4096)
         
         # Create new agent with the specified model
+        # Sanitize model name for agent name (only alphanumeric and underscores)
+        safe_model_name = model.replace(':', '_').replace('.', '_').replace('-', '_')
         new_agent = Agent(
-            name=f"context_engineering_agent_{model.replace(':', '_')}",
+            name=f"context_engineering_agent_{safe_model_name}",
             model=LiteLlm(
                 model=f"ollama_chat/{model}",
                 temperature=temperature,
