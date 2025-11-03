@@ -2,9 +2,9 @@
 @tailwind components;
 @tailwind utilities; */
 
-@plugin "tailwindcss-animate";
-
 @import "tailwindcss";
+
+@plugin "tailwindcss-animate";
 
 @custom-variant dark (&:is(.dark *));
 
