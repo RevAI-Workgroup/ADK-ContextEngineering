@@ -1,6 +1,6 @@
 import { ChatInterface } from '../components/chat/ChatInterface'
 import { ModelSelector } from '../components/chat/ModelSelector'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card'
+import { Card, CardContent, CardHeader } from '../components/ui/card'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
 import { Bot, Trash2, XCircle, ChevronDown, ChevronUp } from 'lucide-react'
