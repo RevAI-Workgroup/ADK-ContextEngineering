@@ -21,6 +21,8 @@ from google.adk import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
 from src.core.config import get_config
+from src.core.context_config import ContextEngineeringConfig
+from src.core.modular_pipeline import ContextPipeline
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +137,8 @@ class ADKAgentWrapper:
         message: str,
         session_id: Optional[str] = None,
         include_thinking: bool = True,
-        model: Optional[str] = None
+        model: Optional[str] = None,
+        config: Optional[ContextEngineeringConfig] = None
     ) -> Dict[str, Any]:
         """
         Process a message through the ADK agent (synchronous).
@@ -145,6 +148,7 @@ class ADKAgentWrapper:
             session_id: Optional session ID for conversation tracking
             include_thinking: Whether to include thinking steps
             model: Optional model name to use (e.g., "qwen3:4b", "llama2:7b")
+            config: Optional context engineering configuration
             
         Returns:
             Dictionary containing response, thinking steps, tool calls, and metrics
@@ -153,6 +157,35 @@ class ADKAgentWrapper:
         start_time = time.time()
         
         try:
+            # Initialize context engineering pipeline if config provided
+            pipeline = None
+            pipeline_context = None
+            pipeline_metrics = {}
+            
+            if config:
+                logger.info(f"Initializing context engineering pipeline with config: {config.get_enabled_techniques()}")
+                pipeline = ContextPipeline(config)
+                
+                # Process message through pipeline before sending to agent
+                pipeline_context = pipeline.process(
+                    query=message,
+                    conversation_history=[]  # TODO: Get from session in future
+                )
+                
+                # Get pipeline metrics
+                pipeline_metrics = pipeline.get_aggregated_metrics()
+                logger.info(f"Pipeline processed in {pipeline_metrics.get('total_execution_time_ms', 0):.2f}ms")
+                
+                # If pipeline modified the context, use the enriched version
+                if pipeline_context.context:
+                    # Prepend pipeline context to the message
+                    enriched_message = f"{pipeline_context.context}\n\nUser Query: {message}"
+                    logger.info(f"Enriched message with pipeline context ({len(pipeline_context.context)} chars)")
+                else:
+                    enriched_message = message
+            else:
+                enriched_message = message
+            
             # Get the appropriate runner for the specified model
             runner = self._get_or_create_runner(model)
             
@@ -225,8 +258,14 @@ class ADKAgentWrapper:
             response_data["metrics"] = {
                 "latency_ms": latency_ms,
                 "timestamp": datetime.utcnow().isoformat(),
-                "session_id": session_id
+                "session_id": session_id,
+                "pipeline_metrics": pipeline_metrics if pipeline_metrics else None,
+                "enabled_techniques": config.get_enabled_techniques() if config else []
             }
+            
+            # Include pipeline metadata if available
+            if pipeline_context:
+                response_data["pipeline_metadata"] = pipeline_context.metadata
             
             # Store in session if session_id provided
             if session_id:
@@ -313,7 +352,8 @@ class ADKAgentWrapper:
         self,
         message: str,
         session_id: Optional[str] = None,
-        model: Optional[str] = None
+        model: Optional[str] = None,
+        config: Optional[ContextEngineeringConfig] = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Process a message through the ADK agent with streaming updates.
@@ -327,6 +367,7 @@ class ADKAgentWrapper:
             message: User's message
             session_id: Optional session ID
             model: Optional model name to use (e.g., "qwen3:4b", "llama2:7b")
+            config: Optional context engineering configuration
             
         Yields:
             Event dictionaries with type and data
@@ -351,6 +392,39 @@ class ADKAgentWrapper:
                 "data": {"message": "Processing your request..."}
             }
             
+            # Initialize context engineering pipeline if config provided
+            pipeline = None
+            pipeline_context = None
+            pipeline_metrics = {}
+            
+            if config:
+                logger.info(f"Initializing context engineering pipeline with config: {config.get_enabled_techniques()}")
+                pipeline = ContextPipeline(config)
+                
+                yield {
+                    "type": "thinking",
+                    "data": {"message": f"Running context engineering modules: {', '.join(config.get_enabled_techniques())}"}
+                }
+                
+                # Process message through pipeline before sending to agent
+                pipeline_context = pipeline.process(
+                    query=message,
+                    conversation_history=[]  # TODO: Get from session in future
+                )
+                
+                # Get pipeline metrics
+                pipeline_metrics = pipeline.get_aggregated_metrics()
+                logger.info(f"Pipeline processed in {pipeline_metrics.get('total_execution_time_ms', 0):.2f}ms")
+                
+                # If pipeline modified the context, use the enriched version
+                if pipeline_context.context:
+                    enriched_message = f"{pipeline_context.context}\n\nUser Query: {message}"
+                    logger.info(f"Enriched message with pipeline context ({len(pipeline_context.context)} chars)")
+                else:
+                    enriched_message = message
+            else:
+                enriched_message = message
+            
             # Ensure session exists before running agent
             try:
                 # Try to get existing session
@@ -372,10 +446,10 @@ class ADKAgentWrapper:
                 )
                 logger.info(f"Created new session: {new_session.id}")
             
-            # Create message content
+            # Create message content (use enriched message if pipeline was used)
             content = types.Content(
                 role='user',
-                parts=[types.Part(text=message)]
+                parts=[types.Part(text=enriched_message)]
             )
             
             # Run agent and stream events using the model-specific runner
@@ -415,14 +489,22 @@ class ADKAgentWrapper:
                                 response_text = part.text
             
             # Send final response
+            response_data = {
+                "response": response_text,
+                "thinking_steps": thinking_steps,
+                "tool_calls": tool_calls,
+                "model": resolved_model,
+                "pipeline_metrics": pipeline_metrics if pipeline_metrics else None,
+                "enabled_techniques": config.get_enabled_techniques() if config else []
+            }
+            
+            # Include pipeline metadata if available
+            if pipeline_context:
+                response_data["pipeline_metadata"] = pipeline_context.metadata
+            
             yield {
                 "type": "response",
-                "data": {
-                    "response": response_text,
-                    "thinking_steps": thinking_steps,
-                    "tool_calls": tool_calls,
-                    "model": resolved_model
-                }
+                "data": response_data
             }
             
         except Exception as e:

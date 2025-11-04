@@ -369,29 +369,29 @@ context-engineering-sandbox/
 - [x] Implement methods: `add_run()`, `get_recent_runs()`, `get_runs_by_query()`, `clear_history()`
 - [x] Add thread-safe file operations
 
-### Backend Modular Pipeline Architecture
-- [ ] Create `src/core/modular_pipeline.py` with base `ContextEngineeringModule` class
-- [ ] Define module interface: `enabled`, `configure()`, `process()`, `get_metrics()`
-- [ ] Implement stub modules (to be filled in future phases):
+### Backend Modular Pipeline Architecture ✅ COMPLETE
+- [x] Create `src/core/modular_pipeline.py` with base `ContextEngineeringModule` class
+- [x] Define module interface: `enabled`, `configure()`, `process()`, `get_metrics()`
+- [x] Implement stub modules (to be filled in future phases):
   - `RAGModule` - placeholder for vector retrieval
   - `CompressionModule` - placeholder for context compression
   - `RerankingModule` - placeholder for document reranking
   - `CachingModule` - placeholder for semantic cache
   - `HybridSearchModule` - placeholder for BM25+vector search
   - `MemoryModule` - placeholder for conversation memory
-- [ ] Create `ContextPipeline` orchestrator that chains enabled modules
-- [ ] Implement metric aggregation from all active modules
+- [x] Create `ContextPipeline` orchestrator that chains enabled modules
+- [x] Implement metric aggregation from all active modules
 
-### Backend API Endpoints
-- [ ] Update `src/api/adk_wrapper.py` to accept `config` parameter in `process_message()`
-- [ ] Integrate `ContextPipeline` before ADK agent processing
-- [ ] Add `GET /api/runs` - Get recent runs (with optional query filter)
-- [ ] Add `GET /api/runs/{run_id}` - Get specific run by ID
-- [ ] Add `POST /api/runs/clear` - Clear run history
-- [ ] Add `GET /api/runs/compare` - Compare multiple runs (query param: `run_ids`)
-- [ ] Add `GET /api/config/presets` - Get available configuration presets
-- [ ] Add `POST /api/config/validate` - Validate configuration object
-- [ ] Add `GET /api/config/default` - Get default configuration
+### Backend API Endpoints ✅ COMPLETE
+- [x] Update `src/api/adk_wrapper.py` to accept `config` parameter in `process_message()`
+- [x] Integrate `ContextPipeline` before ADK agent processing
+- [x] Add `GET /api/runs` - Get recent runs (with optional query filter)
+- [x] Add `GET /api/runs/{run_id}` - Get specific run by ID
+- [x] Add `POST /api/runs/clear` - Clear run history
+- [x] Add `GET /api/runs/compare` - Compare multiple runs (query param: `run_ids`)
+- [x] Add `GET /api/config/presets` - Get available configuration presets
+- [x] Add `POST /api/config/validate` - Validate configuration object
+- [x] Add `GET /api/config/default` - Get default configuration
 
 ### Frontend Configuration Panel
 - [ ] Create `frontend/src/components/chat/ConfigurationPanel.tsx`
