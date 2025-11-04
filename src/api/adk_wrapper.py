@@ -8,6 +8,7 @@ streaming interfaces for the FastAPI endpoints.
 import asyncio
 import logging
 import json
+import re
 import time
 import uuid
 from typing import Dict, Any, List, AsyncGenerator, Optional
@@ -95,7 +96,10 @@ class ADKAgentWrapper:
         
         # Create new agent with the specified model
         # Sanitize model name for agent name (only alphanumeric and underscores)
-        safe_model_name = model.replace(':', '_').replace('.', '_').replace('-', '_')
+        # Convert non-alphanumeric/underscore chars to underscore, collapse consecutive underscores, strip edges
+        safe_model_name = re.sub(r'[^A-Za-z0-9_]', '_', model)
+        safe_model_name = re.sub(r'_+', '_', safe_model_name)
+        safe_model_name = safe_model_name.strip('_')
         new_agent = Agent(
             name=f"context_engineering_agent_{safe_model_name}",
             model=LiteLlm(

@@ -392,8 +392,18 @@ class RunHistoryManager:
                     run_dict[run.id] = run
                 
                 # Sort by timestamp, most recent first
+                # Parse timestamps to datetime objects for proper chronological ordering
                 all_runs = list(run_dict.values())
-                all_runs.sort(key=lambda r: r.timestamp, reverse=True)
+                
+                def get_timestamp_dt(run: RunRecord) -> datetime:
+                    """Parse run timestamp into timezone-aware datetime."""
+                    dt = datetime.fromisoformat(run.timestamp)
+                    # If naive datetime, treat as UTC
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    return dt
+                
+                all_runs.sort(key=get_timestamp_dt, reverse=True)
                 
                 # Keep only max_runs
                 all_runs = all_runs[:self.max_runs]
