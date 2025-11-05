@@ -28,12 +28,13 @@ Before running any startup script, ensure you have:
      pip install -r requirements.txt
      ```
 
-3. **Frontend dependencies** installed:
+3. **Workspace dependencies** installed:
    ```bash
-   cd frontend
+   # From project root - this installs both root and frontend dependencies
    pnpm install
-   cd ..
    ```
+
+   **Important**: This project uses pnpm workspaces. Running `pnpm install` from the root will automatically install dependencies for all workspace packages (frontend, etc.). Do NOT run `cd frontend && pnpm install` separately unless debugging.
 
 ## Usage
 

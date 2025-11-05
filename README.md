@@ -200,11 +200,16 @@ adk web
 ### Option D: Frontend Only (for development)
 
 ```bash
+# First, ensure workspace dependencies are installed from root
+pnpm install
+
+# Then start frontend
 cd frontend
-pnpm install  # or: npm install
-pnpm dev      # or: npm run dev
+npm run dev
 # Opens at http://localhost:5173
 ```
+
+**Note**: This project uses pnpm workspaces. Never run `pnpm install` from the `frontend/` directory - always install from the project root first.
 
 ---
 
@@ -415,11 +420,24 @@ ls context_engineering_agent/  # Should show agent.py
 ```
 
 ### Frontend won't start
+
+**Error**: `Cannot find package '@vitejs/plugin-react'` or similar dependency errors
+
+**Root cause**: Missing workspace configuration or incorrect dependency installation
+
+**Solution**:
 ```bash
-# Install dependencies first
-cd frontend
-pnpm install  # or: npm install
-pnpm dev
+# 1. Verify pnpm-workspace.yaml is configured correctly
+cat pnpm-workspace.yaml
+# Should contain:
+#   packages:
+#     - 'frontend'
+
+# 2. Install all workspace dependencies from project root
+pnpm install
+
+# 3. Try starting frontend
+cd frontend && npm run dev
 ```
 
 ### Tests fail with "ModuleNotFoundError"

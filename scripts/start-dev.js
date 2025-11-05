@@ -210,17 +210,36 @@ async function main() {
   log('SYSTEM', 'Starting development servers...\n', colors.cyan);
 
   try {
+    const fs = require('fs');
+
     // Check if venv exists
-    const venvPath = isWindows 
+    const venvPath = isWindows
       ? path.join(rootDir, 'venv', 'Scripts', 'activate.bat')
       : path.join(rootDir, 'venv', 'bin', 'activate');
-    
-    const fs = require('fs');
+
     if (!fs.existsSync(venvPath)) {
       log('ERROR', 'Virtual environment not found!', colors.red);
       log('ERROR', 'Please run: python -m venv venv', colors.red);
       log('ERROR', `Then: ${isWindows ? 'venv\\Scripts\\activate && pip install -r requirements.txt' : 'source venv/bin/activate && pip install -r requirements.txt'}`, colors.red);
       process.exit(1);
+    }
+
+    // Check if workspace dependencies are installed
+    const nodeModulesPath = path.join(rootDir, 'node_modules');
+    const frontendNodeModulesPath = path.join(rootDir, 'frontend', 'node_modules');
+
+    if (!fs.existsSync(nodeModulesPath)) {
+      log('ERROR', 'Workspace dependencies not found!', colors.red);
+      log('ERROR', 'Please run: pnpm install', colors.red);
+      log('ERROR', '(Run from project root, not from frontend directory)', colors.red);
+      process.exit(1);
+    }
+
+    // Warn if frontend has its own node_modules (incorrect workspace setup)
+    if (fs.existsSync(frontendNodeModulesPath)) {
+      log('WARNING', 'Frontend has its own node_modules directory!', colors.yellow);
+      log('WARNING', 'This may indicate incorrect workspace setup.', colors.yellow);
+      log('WARNING', 'Consider running: rm -rf frontend/node_modules && pnpm install', colors.yellow);
     }
 
     // Start both servers
