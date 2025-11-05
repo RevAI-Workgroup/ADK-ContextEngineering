@@ -127,13 +127,3 @@ export const ingestDocuments = async (
   });
   return response.data;
 };
-
-export default {
-  getVectorStoreStats,
-  searchVectorStore,
-  clearVectorStore,
-  listDocuments,
-  uploadDocument,
-  deleteDocument,
-  ingestDocuments
-};
