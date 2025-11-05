@@ -79,11 +79,14 @@ export function RunHistory({ onCompareRuns, onRerunWithConfig, className }: RunH
       setFilteredRuns(data)
       
       // Prune selectedRunIds to only include IDs that still exist
+      // Use functional update to avoid closing over stale state
       const existingIds = new Set(data.map((run) => run.id))
-      const prunedSelectedIds = new Set(
-        Array.from(selectedRunIds).filter((id) => existingIds.has(id))
-      )
-      setSelectedRunIds(prunedSelectedIds)
+      setSelectedRunIds(prevSelected => {
+        const prunedSelectedIds = new Set(
+          Array.from(prevSelected).filter((id) => existingIds.has(id))
+        )
+        return prunedSelectedIds
+      })
     } catch (error) {
       console.error('Failed to load runs:', error)
     } finally {

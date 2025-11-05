@@ -77,9 +77,9 @@ export function Metrics() {
 
   const handleRunSelection = (runId: string, checked: boolean) => {
     if (checked) {
-      setSelectedRunIds([...selectedRunIds, runId])
+      setSelectedRunIds(prev => [...prev, runId])
     } else {
-      setSelectedRunIds(selectedRunIds.filter(id => id !== runId))
+      setSelectedRunIds(prev => prev.filter(id => id !== runId))
     }
   }
 

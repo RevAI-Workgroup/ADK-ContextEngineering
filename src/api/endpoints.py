@@ -170,7 +170,7 @@ async def chat(
         
     except Exception as e:
         logger.error(f"Error processing chat message: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @chat_router.websocket("/chat/ws")
@@ -702,7 +702,7 @@ async def get_runs(
         }
     except Exception as e:
         logger.error(f"Error fetching runs: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @runs_router.get("/runs/{run_id}")
@@ -728,7 +728,7 @@ async def get_run_by_id(run_id: str):
         raise
     except Exception as e:
         logger.error(f"Error fetching run by ID: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @runs_router.post("/runs/clear")
@@ -751,7 +751,7 @@ async def clear_runs():
         }
     except Exception as e:
         logger.error(f"Error clearing runs: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @runs_router.get("/runs/compare")
@@ -806,7 +806,7 @@ async def compare_runs(run_ids: str):
         raise
     except Exception as e:
         logger.error(f"Error comparing runs: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 def _compare_run_metrics(runs: List[RunRecord]) -> Dict[str, Any]:
@@ -874,7 +874,7 @@ async def get_run_stats():
         }
     except Exception as e:
         logger.error(f"Error fetching run stats: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # ============================================================================
@@ -896,7 +896,7 @@ async def get_default_configuration():
         }
     except Exception as e:
         logger.error(f"Error getting default config: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @config_router.get("/config/presets")
@@ -924,7 +924,7 @@ async def get_configuration_presets():
         }
     except Exception as e:
         logger.error(f"Error getting config presets: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @config_router.get("/config/presets/{preset_name}")
@@ -956,7 +956,7 @@ async def get_preset_configuration(preset_name: str):
         raise
     except Exception as e:
         logger.error(f"Error getting preset config: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 class ConfigValidationRequest(BaseModel):

@@ -197,10 +197,10 @@ class ADKAgentWrapper:
                 session_id = f"session-{uuid.uuid4().hex[:8]}"
             user_id = "api-user"
             
-            # Create message content
+            # Create message content (use enriched message if pipeline was used)
             content = types.Content(
                 role='user',
-                parts=[types.Part(text=message)]
+                parts=[types.Part(text=enriched_message)]
             )
             
             # Run agent and collect events
