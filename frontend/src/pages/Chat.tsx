@@ -9,7 +9,7 @@ import { Button } from '../components/ui/button'
 import { Bot, Trash2, XCircle, ChevronDown, ChevronUp } from 'lucide-react'
 import { useChatContext } from '../contexts/ChatContext'
 import { modelsService } from '../services/modelsService'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Alert, AlertDescription } from '../components/ui/alert'
 
 export function Chat() {
@@ -21,6 +21,8 @@ export function Chat() {
   const [showRunHistory, setShowRunHistory] = useState(false)
   const [comparisonRunIds, setComparisonRunIds] = useState<string[]>([])
   const [showComparison, setShowComparison] = useState(false)
+  const configPanelRef = useRef<HTMLDivElement>(null)
+  const configButtonRef = useRef<HTMLButtonElement>(null)
 
   // Auto-dismiss success messages after 5 seconds with proper cleanup
   useEffect(() => {
@@ -29,6 +31,26 @@ export function Chat() {
       return () => clearTimeout(timer)
     }
   }, [clearMessage])
+
+  // Handle click outside configuration panel
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        showConfigPanel &&
+        configPanelRef.current &&
+        configButtonRef.current &&
+        !configPanelRef.current.contains(event.target as Node) &&
+        !configButtonRef.current.contains(event.target as Node)
+      ) {
+        setShowConfigPanel(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [showConfigPanel])
 
   const handleClearModels = async () => {
     setIsClearing(true)
@@ -83,6 +105,7 @@ export function Chat() {
       {/* Left Sidebar - Configuration & Run History */}
       <div className="w-80 space-y-4">
         <Button
+          ref={configButtonRef}
           variant={showConfigPanel ? 'default' : 'outline'}
           className="w-full"
           onClick={() => setShowConfigPanel(!showConfigPanel)}
@@ -91,10 +114,12 @@ export function Chat() {
         </Button>
         
         {showConfigPanel && (
-          <ConfigurationPanel
-            config={config}
-            onConfigChange={setConfig}
-          />
+          <div ref={configPanelRef}>
+            <ConfigurationPanel
+              config={config}
+              onConfigChange={setConfig}
+            />
+          </div>
         )}
         
         <Button

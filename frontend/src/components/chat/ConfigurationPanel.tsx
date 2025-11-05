@@ -106,13 +106,23 @@ export function ConfigurationPanel({ config, onConfigChange, className }: Config
             <Settings className="h-5 w-5" />
             <CardTitle>Context Engineering Configuration</CardTitle>
           </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={handleValidate}>
-              <Check className="h-4 w-4 mr-2" />
-              Validate
+          <div className="flex items-center gap-1.5">
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={handleValidate}
+              className="h-7 px-2 text-xs"
+            >
+              <Check className="h-3 w-3 mr-1" />
+              Save
             </Button>
-            <Button variant="outline" size="sm" onClick={handleResetToDefault}>
-              <RotateCcw className="h-4 w-4 mr-2" />
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={handleResetToDefault}
+              className="h-7 px-2 text-xs"
+            >
+              <RotateCcw className="h-3 w-3 mr-1" />
               Reset
             </Button>
           </div>
