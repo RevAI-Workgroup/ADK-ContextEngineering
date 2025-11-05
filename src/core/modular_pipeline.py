@@ -160,17 +160,17 @@ class ContextEngineeringModule(ABC):
 class RAGModule(ContextEngineeringModule):
     """
     Retrieval-Augmented Generation module (Phase 3).
-    
-    This module will retrieve relevant documents from a vector database
-    and inject them into the context.
-    
-    Future implementation will include:
-    - Vector database integration
+
+    This module retrieves relevant documents from a vector database
+    and injects them into the context.
+
+    Features:
+    - Vector database integration (ChromaDB)
     - Document chunking and embedding
     - Similarity search
     - Context assembly
     """
-    
+
     def __init__(self):
         super().__init__("RAG")
         self.chunk_size = 512
@@ -179,6 +179,9 @@ class RAGModule(ContextEngineeringModule):
         self.similarity_threshold = 0.7
         self.embedding_model = "sentence-transformers/all-MiniLM-L6-v2"
         self._last_metrics = ModuleMetrics(module_name=self.name)
+
+        # Lazy initialization of vector store (only when needed)
+        self._vector_store = None
     
     def configure(self, config: Dict[str, Any]) -> None:
         """Configure RAG parameters."""
@@ -194,34 +197,131 @@ class RAGModule(ContextEngineeringModule):
     
     def process(self, context: PipelineContext) -> PipelineContext:
         """
-        Process context through RAG (stub implementation).
-        
-        Future: Will retrieve relevant documents and inject into context.
+        Process context through RAG - retrieve relevant documents and inject into context.
+
+        Args:
+            context: Pipeline context with query
+
+        Returns:
+            Updated context with retrieved documents
         """
         start_time = time.time()
-        
-        # Stub: Just pass through for now
-        # TODO Phase 3: Implement vector retrieval
+
         self.logger.info(f"RAG processing query: {context.query[:50]}...")
-        
-        # Placeholder: Add a note that RAG would be applied here
-        context.metadata["rag_status"] = "stub - not yet implemented"
-        context.metadata["rag_config"] = {
-            "chunk_size": self.chunk_size,
-            "top_k": self.top_k,
-            "similarity_threshold": self.similarity_threshold
-        }
-        
-        execution_time = (time.time() - start_time) * 1000
-        self._last_metrics = ModuleMetrics(
-            module_name=self.name,
-            execution_time_ms=execution_time,
-            technique_specific={
-                "retrieved_docs": 0,  # Placeholder
-                "status": "stub"
-            }
-        )
-        
+
+        # Initialize vector store if not already initialized
+        if self._vector_store is None:
+            try:
+                from src.retrieval.vector_store import get_vector_store
+                self._vector_store = get_vector_store()
+                self.logger.info("Vector store initialized")
+            except Exception as e:
+                self.logger.error(f"Failed to initialize vector store: {e}", exc_info=True)
+                # Mark as error and continue
+                context.metadata["rag_status"] = "error"
+                context.metadata["rag_error"] = str(e)
+                self._last_metrics = ModuleMetrics(
+                    module_name=self.name,
+                    execution_time_ms=(time.time() - start_time) * 1000,
+                    technique_specific={"status": "error", "error": str(e)}
+                )
+                return context
+
+        # Check if vector store has documents
+        doc_count = self._vector_store.count()
+        if doc_count == 0:
+            self.logger.warning("Vector store is empty - no documents to retrieve")
+            context.metadata["rag_status"] = "empty"
+            context.metadata["rag_message"] = "No documents in vector store"
+            self._last_metrics = ModuleMetrics(
+                module_name=self.name,
+                execution_time_ms=(time.time() - start_time) * 1000,
+                technique_specific={
+                    "status": "empty",
+                    "retrieved_docs": 0,
+                    "total_docs_in_store": 0
+                }
+            )
+            return context
+
+        # Perform retrieval
+        try:
+            results = self._vector_store.search(
+                query=context.query,
+                top_k=self.top_k,
+                similarity_threshold=self.similarity_threshold
+            )
+
+            # Assemble context from retrieved documents
+            if results:
+                retrieved_texts = []
+                sources = []
+
+                for i, result in enumerate(results):
+                    # Format retrieved chunk
+                    source = result.metadata.get("source", "unknown")
+                    chunk_idx = result.metadata.get("chunk_index", "")
+                    similarity = result.similarity
+
+                    # Add to context
+                    retrieved_texts.append(
+                        f"[Document {i+1}] (similarity: {similarity:.3f}, source: {source})\n"
+                        f"{result.text}"
+                    )
+                    sources.append(source)
+
+                # Join all retrieved texts
+                context.context = "\n\n---\n\n".join(retrieved_texts)
+
+                # Store metadata
+                context.metadata["rag_status"] = "success"
+                context.metadata["rag_retrieved_docs"] = len(results)
+                context.metadata["rag_sources"] = list(set(sources))  # Unique sources
+                context.metadata["rag_avg_similarity"] = (
+                    sum(r.similarity for r in results) / len(results)
+                )
+
+                self.logger.info(
+                    f"Retrieved {len(results)} documents "
+                    f"(avg similarity: {context.metadata['rag_avg_similarity']:.3f})"
+                )
+
+            else:
+                # No results above threshold
+                context.metadata["rag_status"] = "no_results"
+                context.metadata["rag_message"] = (
+                    f"No documents found above similarity threshold {self.similarity_threshold}"
+                )
+                self.logger.warning("No documents retrieved above threshold")
+
+            # Calculate metrics
+            execution_time = (time.time() - start_time) * 1000
+            self._last_metrics = ModuleMetrics(
+                module_name=self.name,
+                execution_time_ms=execution_time,
+                input_tokens=len(context.query.split()),
+                output_tokens=len(context.context.split()) if context.context else 0,
+                technique_specific={
+                    "status": context.metadata.get("rag_status"),
+                    "retrieved_docs": len(results),
+                    "total_docs_in_store": doc_count,
+                    "avg_similarity": context.metadata.get("rag_avg_similarity", 0.0),
+                    "sources": context.metadata.get("rag_sources", []),
+                    "threshold": self.similarity_threshold,
+                    "top_k": self.top_k
+                }
+            )
+
+        except Exception as e:
+            self.logger.error(f"RAG retrieval failed: {e}", exc_info=True)
+            context.metadata["rag_status"] = "error"
+            context.metadata["rag_error"] = str(e)
+            self._last_metrics = ModuleMetrics(
+                module_name=self.name,
+                execution_time_ms=(time.time() - start_time) * 1000,
+                technique_specific={"status": "error", "error": str(e)}
+            )
+
         return context
     
     def get_metrics(self) -> ModuleMetrics:

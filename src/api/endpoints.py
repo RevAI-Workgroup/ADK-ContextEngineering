@@ -34,6 +34,7 @@ tools_router = APIRouter()
 models_router = APIRouter()
 runs_router = APIRouter()
 config_router = APIRouter()
+documents_router = APIRouter()
 
 
 # ============================================================================
@@ -1016,4 +1017,325 @@ async def validate_configuration(request: ConfigValidationRequest):
             "errors": [f"Configuration parsing error: {str(e)}"],
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
+
+
+# ============================================================================
+# DOCUMENT MANAGEMENT ENDPOINTS
+# ============================================================================
+
+from fastapi import UploadFile, File
+from pathlib import Path
+
+
+class DocumentIngestRequest(BaseModel):
+    """Request model for bulk document ingestion."""
+    directory: str = Field(..., description="Directory path to ingest documents from")
+    recursive: bool = Field(True, description="Whether to search recursively")
+    file_extensions: Optional[List[str]] = Field(None, description="File extensions to include")
+
+
+@documents_router.post("/documents/upload")
+async def upload_document(
+    file: UploadFile = File(...),
+    description: Optional[str] = None
+):
+    """
+    Upload a document to the vector store.
+
+    Supports .txt and .md files.
+
+    Args:
+        file: File to upload
+        description: Optional description for the document
+    """
+    try:
+        from src.retrieval.vector_store import get_vector_store
+        from src.retrieval.document_loader import load_document
+        from src.retrieval.chunking import chunk_document
+
+        # Validate file type
+        file_extension = Path(file.filename).suffix.lower()
+        if file_extension not in [".txt", ".md"]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file type: {file_extension}. Supported: .txt, .md"
+            )
+
+        # Create knowledge base directory
+        kb_dir = Path("data/knowledge_base")
+        kb_dir.mkdir(parents=True, exist_ok=True)
+
+        # Save uploaded file
+        file_path = kb_dir / file.filename
+        content = await file.read()
+
+        with open(file_path, "wb") as f:
+            f.write(content)
+
+        logger.info(f"Saved uploaded file: {file.filename}")
+
+        # Load document
+        document = load_document(str(file_path))
+
+        # Add description to metadata if provided
+        if description:
+            document.metadata["description"] = description
+
+        # Chunk document
+        chunks = chunk_document(
+            text=document.content,
+            metadata=document.metadata,
+            strategy="fixed",
+            chunk_size=512,
+            chunk_overlap=50
+        )
+
+        # Add to vector store
+        vector_store = get_vector_store()
+        chunk_texts = [chunk.text for chunk in chunks]
+        chunk_metadatas = [chunk.metadata for chunk in chunks]
+        chunk_ids = vector_store.add_documents(
+            texts=chunk_texts,
+            metadatas=chunk_metadatas
+        )
+
+        logger.info(f"Added {len(chunks)} chunks to vector store")
+
+        return {
+            "success": True,
+            "filename": file.filename,
+            "file_size_bytes": len(content),
+            "chunks_created": len(chunks),
+            "doc_id": document.doc_id,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error uploading document: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@documents_router.post("/documents/ingest")
+async def ingest_documents(request: DocumentIngestRequest):
+    """
+    Bulk ingest documents from a directory.
+
+    Processes all documents in the specified directory and adds them to the vector store.
+    """
+    try:
+        from src.retrieval.vector_store import get_vector_store
+        from src.retrieval.document_loader import load_documents_from_directory
+        from src.retrieval.chunking import chunk_document
+
+        # Load documents
+        documents = load_documents_from_directory(
+            directory=request.directory,
+            recursive=request.recursive,
+            file_extensions=request.file_extensions
+        )
+
+        if not documents:
+            return {
+                "success": True,
+                "message": "No documents found to ingest",
+                "documents_processed": 0,
+                "total_chunks": 0
+            }
+
+        # Chunk all documents
+        all_chunks = []
+        for doc in documents:
+            chunks = chunk_document(
+                text=doc.content,
+                metadata=doc.metadata,
+                strategy="fixed",
+                chunk_size=512,
+                chunk_overlap=50
+            )
+            all_chunks.extend(chunks)
+
+        # Add to vector store
+        vector_store = get_vector_store()
+        chunk_texts = [chunk.text for chunk in all_chunks]
+        chunk_metadatas = [chunk.metadata for chunk in all_chunks]
+        chunk_ids = vector_store.add_documents(
+            texts=chunk_texts,
+            metadatas=chunk_metadatas
+        )
+
+        logger.info(
+            f"Ingested {len(documents)} documents, "
+            f"created {len(all_chunks)} chunks"
+        )
+
+        return {
+            "success": True,
+            "documents_processed": len(documents),
+            "total_chunks": len(all_chunks),
+            "directory": request.directory,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except Exception as e:
+        logger.error(f"Error ingesting documents: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@documents_router.get("/documents")
+async def list_documents():
+    """
+    List all documents in the knowledge base directory.
+    """
+    try:
+        kb_dir = Path("data/knowledge_base")
+
+        if not kb_dir.exists():
+            return {
+                "documents": [],
+                "count": 0,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+
+        # Get all files
+        documents = []
+        for file_path in kb_dir.rglob("*"):
+            if file_path.is_file() and file_path.suffix.lower() in [".txt", ".md"]:
+                documents.append({
+                    "filename": file_path.name,
+                    "path": str(file_path.relative_to(kb_dir)),
+                    "size_bytes": file_path.stat().st_size,
+                    "modified_at": datetime.fromtimestamp(
+                        file_path.stat().st_mtime
+                    ).isoformat()
+                })
+
+        return {
+            "documents": documents,
+            "count": len(documents),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Error listing documents: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@documents_router.delete("/documents/{filename}")
+async def delete_document(filename: str):
+    """
+    Delete a document from the knowledge base.
+
+    Note: This only deletes the file, not the chunks from the vector store.
+    Use /vector-store/clear to clear the vector store.
+    """
+    try:
+        kb_dir = Path("data/knowledge_base")
+        file_path = kb_dir / filename
+
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail=f"Document '{filename}' not found")
+
+        # Delete file
+        file_path.unlink()
+        logger.info(f"Deleted document: {filename}")
+
+        return {
+            "success": True,
+            "filename": filename,
+            "message": "Document deleted successfully",
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting document: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@documents_router.get("/vector-store/stats")
+async def get_vector_store_stats():
+    """
+    Get statistics about the vector store.
+    """
+    try:
+        from src.retrieval.vector_store import get_vector_store
+
+        vector_store = get_vector_store()
+        stats = vector_store.get_stats()
+
+        return {
+            **stats,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting vector store stats: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@documents_router.post("/vector-store/clear")
+async def clear_vector_store():
+    """
+    Clear all documents from the vector store.
+
+    This is a destructive operation that removes all embeddings.
+    """
+    try:
+        from src.retrieval.vector_store import get_vector_store
+
+        vector_store = get_vector_store()
+        vector_store.clear()
+
+        logger.info("Vector store cleared")
+
+        return {
+            "success": True,
+            "message": "Vector store cleared successfully",
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Error clearing vector store: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@documents_router.get("/vector-store/search")
+async def search_vector_store(
+    query: str,
+    top_k: int = 5,
+    similarity_threshold: float = 0.7
+):
+    """
+    Search the vector store for similar documents.
+
+    Args:
+        query: Search query
+        top_k: Number of results to return
+        similarity_threshold: Minimum similarity score
+    """
+    try:
+        from src.retrieval.vector_store import get_vector_store
+
+        vector_store = get_vector_store()
+        results = vector_store.search(
+            query=query,
+            top_k=top_k,
+            similarity_threshold=similarity_threshold
+        )
+
+        return {
+            "results": [result.to_dict() for result in results],
+            "count": len(results),
+            "query": query,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Error searching vector store: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
