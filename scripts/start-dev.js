@@ -239,7 +239,10 @@ async function main() {
     if (fs.existsSync(frontendNodeModulesPath)) {
       log('WARNING', 'Frontend has its own node_modules directory!', colors.yellow);
       log('WARNING', 'This may indicate incorrect workspace setup.', colors.yellow);
-      log('WARNING', 'Consider running: rm -rf frontend/node_modules && pnpm install', colors.yellow);
+      const cleanupCmd = isWindows 
+        ? 'rmdir /s /q frontend\\node_modules && pnpm install'
+        : 'rm -rf frontend/node_modules && pnpm install';
+      log('WARNING', `Consider running: ${cleanupCmd}`, colors.yellow);
     }
 
     // Start both servers
