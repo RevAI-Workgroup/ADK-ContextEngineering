@@ -5,7 +5,7 @@
  * Shows configuration differences, response variations, and metric deltas
  */
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -44,13 +44,7 @@ export function RunComparison({ runIds, open, onOpenChange }: RunComparisonProps
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    if (open && runIds.length >= 2) {
-      loadComparison()
-    }
-  }, [open, runIds])
-
-  const loadComparison = async () => {
+  const loadComparison = useCallback(async () => {
     setIsLoading(true)
     setError(null)
     try {
@@ -62,7 +56,13 @@ export function RunComparison({ runIds, open, onOpenChange }: RunComparisonProps
     } finally {
       setIsLoading(false)
     }
-  }
+  }, [runIds])
+
+  useEffect(() => {
+    if (open && runIds.length >= 2) {
+      loadComparison()
+    }
+  }, [open, runIds, loadComparison])
 
   const handleExport = () => {
     if (!comparison) return

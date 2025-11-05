@@ -1,3 +1,5 @@
+'use client'
+
 /**
  * Run History Component
  * 
@@ -75,6 +77,13 @@ export function RunHistory({ onCompareRuns, onRerunWithConfig, className }: RunH
       const data = await runHistoryService.getRecentRuns(8)
       setRuns(data)
       setFilteredRuns(data)
+      
+      // Prune selectedRunIds to only include IDs that still exist
+      const existingIds = new Set(data.map((run) => run.id))
+      const prunedSelectedIds = new Set(
+        Array.from(selectedRunIds).filter((id) => existingIds.has(id))
+      )
+      setSelectedRunIds(prunedSelectedIds)
     } catch (error) {
       console.error('Failed to load runs:', error)
     } finally {
