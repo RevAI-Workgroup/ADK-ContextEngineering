@@ -33,7 +33,7 @@ This project is a **modular experimentation platform** for context engineering t
 
 ## 📊 Project Status
 
-**Current Phase**: Phase 1.5 - Web UI Development ✅ **COMPLETE**
+**Current Phase**: Phase 2 - Modular Platform Infrastructure ✅ **COMPLETE**
 
 ### Phase 0 Baseline Metrics
 
@@ -52,8 +52,8 @@ This project is a **modular experimentation platform** for context engineering t
 - ✅ **Phase 0**: Foundation & Benchmarking (Complete)
 - ✅ **Phase 1**: MVP Agent with Google ADK (Complete)
 - ✅ **Phase 1.5**: Web UI Development (Complete)
-- ⏳ **Phase 2**: Modular Platform Infrastructure (Next - Build toggleable architecture!)
-- ⏳ **Phase 3**: RAG Module (First technique: vector retrieval)
+- ✅ **Phase 2**: Modular Platform Infrastructure (Complete - Toggleable architecture built!)
+- ⏳ **Phase 3**: RAG Module (Next - First technique: vector retrieval)
 - ⏳ **Phase 4**: Compression, Caching & Memory Modules (Efficiency techniques)
 - ⏳ **Phase 5**: Reranking & Hybrid Search Modules (Quality techniques)
 - ⏳ **Phase 6**: Advanced Technique Modules (Graph RAG, adaptive chunking)
@@ -182,9 +182,55 @@ echo "What is 5 plus 3?" | adk run context_engineering_agent
 adk web
 ```
 
-### 5. Run Tests (Optional)
+### 5. Using Phase 2 Features (Configuration & Run Comparison)
 
-**Manual Test Script:**
+**Access the Web UI:**
+```bash
+# After starting the application (Option A, B, or C above)
+# Navigate to http://localhost:5173 (dev mode) or http://localhost (Docker)
+```
+
+**Configuration Panel:**
+1. Open the Chat page
+2. Click the "⚙️ Configuration" button to expand the panel
+3. **Simple Tab:**
+   - Toggle techniques on/off (RAG, Compression, Reranking, Caching, Hybrid Search, Memory)
+   - Select a preset: Baseline, Basic RAG, Advanced RAG, or Full Stack
+4. **Advanced Tab:**
+   - Fine-tune parameters for each enabled technique
+   - Adjust chunk sizes, top-k values, thresholds, etc.
+
+**Run History & Comparison:**
+1. Execute queries with different configurations
+2. View last 8 runs in the Run History sidebar (on Chat page)
+3. Select multiple runs (checkboxes) to compare
+4. Click "Compare Selected" to see side-by-side analysis
+5. Export comparison results to JSON
+
+**Metrics Dashboard:**
+1. Navigate to the Metrics page
+2. Select runs to compare using the multi-select checkboxes
+3. Filter by date range, query text, or enabled techniques
+4. View charts: Latency, Token Usage, Relevance, Accuracy, Technique Impact
+5. Analyze metrics summary table with best/worst highlighting
+
+### 6. Run Tests (Optional)
+
+**Phase 2 Backend Tests:**
+```bash
+# Run all Phase 2 unit tests (114 tests)
+pytest tests/unit/test_context_config.py -v
+pytest tests/unit/test_run_history.py -v
+pytest tests/unit/test_modular_pipeline.py -v
+
+# Run all tests
+pytest tests/ -v
+
+# Test Phase 2 API endpoints
+python scripts/test_phase2_api.py
+```
+
+**Manual Test Script (Phase 1 Tools):**
 ```bash
 ./scripts/test_adk_agent.sh
 # Tests all 4 tools with example queries
@@ -298,28 +344,98 @@ Phase 1.5 delivers a modern React frontend with AG-UI integration:
 - Responsive design with dark mode support
 - WebSocket streaming for live agent updates
 
-## 🔮 Next Steps: Phase 2 - Modular Platform Infrastructure
+## 🏗️ Phase 2: Modular Platform Infrastructure ✅ COMPLETE
 
-**Building the foundation for experimentation!**
+**Completion Date:** November 5, 2025
 
-Phase 2 builds the infrastructure that makes context engineering techniques toggleable and comparable:
+Phase 2 successfully transformed the project into a modular experimentation platform with toggleable context engineering techniques.
 
-### Backend Infrastructure
-- **Configuration System**: Dataclass with toggles for 6 techniques (RAG, Compression, Reranking, Caching, Hybrid Search, Memory)
-- **Run History**: Track last 8 runs with query, config, response, and metrics
-- **Modular Pipeline**: Base class for all technique modules + orchestrator
-- **API Endpoints**: `/api/runs`, `/api/config`, `/api/runs/compare`
+### ✅ Backend Implementation
 
-### Frontend Components
-- **Configuration Panel**: Simple toggles + advanced settings for each technique
-- **Run History Sidebar**: View and select from last 8 runs
-- **Run Comparison Modal**: Side-by-side comparison with metric deltas
-- **Updated Metrics Page**: Compare selected runs instead of sequential phases
+**Configuration System** (`src/core/context_config.py`)
+- 6 technique modules with full configuration: RAG, Compression, Reranking, Caching, Hybrid Search, Memory
+- JSON serialization/deserialization for API transport
+- 28 validation rules ensuring configuration integrity
+- 4 configuration presets: Baseline, Basic RAG, Advanced RAG, Full Stack
+- **47 unit tests** with 100% coverage
 
-### Why This Matters
-This phase transforms the application from "what does Phase 3 deliver?" to "what happens when I turn RAG on?" - enabling true experimentation with context engineering techniques.
+**Run History System** (`src/memory/run_history.py`)
+- Tracks last 8 runs with query, configuration, response, and metrics
+- Thread-safe JSON file storage with atomic writes
+- Search by query text, technique, or model
+- Export/import functionality
+- **52 unit tests** with 100% coverage
 
-**After Phase 2**, each subsequent phase will implement ONE technique module that plugs into this infrastructure.
+**Modular Pipeline** (`src/core/modular_pipeline.py`)
+- Abstract base class `ContextEngineeringModule` for all techniques
+- 6 stub modules ready for Phase 3+ implementation
+- Pipeline orchestrator with metric aggregation
+- **15 unit tests** with 100% coverage
+
+**API Endpoints** (`src/api/endpoints.py`)
+- 9 new endpoints for configuration and run management:
+  - `/api/config/presets` - Get configuration presets
+  - `/api/config/default` - Get default configuration
+  - `/api/config/validate` - Validate configurations
+  - `/api/runs` - Get recent runs with filters
+  - `/api/runs/{run_id}` - Get specific run
+  - `/api/runs/compare` - Compare multiple runs
+  - `/api/runs/stats` - Get history statistics
+  - Enhanced `/api/chat` endpoint with configuration support
+
+### ✅ Frontend Implementation
+
+**Configuration Panel** (`ConfigurationPanel.tsx`)
+- Two-tab interface: Simple (toggles) + Advanced (detailed settings)
+- 6 technique toggle switches with validation feedback
+- Preset selector with 4 presets
+- Collapsible panel with localStorage persistence
+
+**Run History & Comparison** (`RunHistory.tsx`, `RunComparison.tsx`)
+- Displays last 8 runs with query, timestamp, model, and active techniques
+- Multi-select for comparison (up to 3 runs)
+- Filter by query text
+- Side-by-side comparison modal with metric deltas
+- Export to JSON functionality
+
+**Metrics Page Transformation** (`Metrics.tsx`)
+- Changed from "Phase Comparison" to "Run Comparison"
+- Run selector with multi-select checkboxes
+- Filters: date range, query text, enabled techniques
+- 5 chart types: Latency, Token Usage, Relevance, Accuracy, Technique Impact
+- Metrics summary table with best/worst highlighting
+
+### 🎯 Key Features
+
+**Experimentation Workflow:**
+1. **Configure** → Toggle techniques, adjust parameters, or select presets
+2. **Run** → Execute query with current configuration (automatically saved)
+3. **Store** → Last 8 runs kept in persistent history
+4. **Compare** → Select multiple runs for side-by-side analysis
+5. **Analyze** → View metric deltas and technique impact
+6. **Iterate** → Refine configuration based on insights
+
+**Example Use Case:**
+- Run 1: Baseline (no techniques) → Accuracy: 0.85
+- Run 2: +RAG enabled → Accuracy: 0.95 (+10%)
+- Run 3: +RAG +Compression → Accuracy: 0.93, Tokens: -22%
+
+### 📚 Documentation
+- **[PHASE2_COMPLETE.md](PHASE2_COMPLETE.md)** - Implementation completion report
+- **[docs/PHASE2_API_DOCUMENTATION.md](docs/PHASE2_API_DOCUMENTATION.md)** - Complete API reference
+- **[docs/PHASE2_QUICKSTART.md](docs/PHASE2_QUICKSTART.md)** - Quick start guide
+- **[docs/phase_summaries/phase2_completion_summary.md](docs/phase_summaries/phase2_completion_summary.md)** - Detailed summary
+
+## 🔮 Next Steps: Phase 3 - RAG Module Implementation
+
+**Implementing the first context engineering technique!**
+
+Phase 3 will implement RAG (Retrieval-Augmented Generation) as the first pluggable technique module:
+- Set up ChromaDB vector database
+- Implement document ingestion pipeline
+- Create RAG retrieval module extending `ContextEngineeringModule`
+- Add document upload UI in frontend
+- **Measure real context engineering gains**: First meaningful metrics improvement over baseline!
 
 ## 🤝 Contributing
 
@@ -346,6 +462,116 @@ This is a research and demonstration project. Contributions are welcome:
 ---
 
 ## 🧪 Advanced Testing
+
+### Testing Phase 2 API Endpoints
+
+**Check API Health:**
+```bash
+curl http://localhost:8000/
+# Returns: {"status": "healthy", "phase": "Phase 2 - Modular Pipeline Infrastructure", ...}
+```
+
+**Configuration Endpoints:**
+```bash
+# Get default configuration
+curl http://localhost:8000/api/config/default
+
+# Get all presets
+curl http://localhost:8000/api/config/presets
+
+# Get specific preset
+curl http://localhost:8000/api/config/presets/basic_rag
+curl http://localhost:8000/api/config/presets/full_stack
+
+# Validate configuration
+curl -X POST http://localhost:8000/api/config/validate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "config": {
+      "rag": {"enabled": true, "top_k": 5, "chunk_size": 512},
+      "compression": {"enabled": false}
+    }
+  }'
+```
+
+**Chat with Configuration:**
+```bash
+# Basic chat (baseline)
+curl -X POST http://localhost:8000/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "What is machine learning?",
+    "include_thinking": true
+  }'
+
+# Chat with RAG enabled
+curl -X POST http://localhost:8000/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "What is machine learning?",
+    "include_thinking": true,
+    "config": {
+      "rag": {"enabled": true, "top_k": 5}
+    }
+  }'
+```
+
+**Run History Endpoints:**
+```bash
+# Get recent runs
+curl http://localhost:8000/api/runs
+
+# Get runs with query filter
+curl http://localhost:8000/api/runs?query=machine+learning
+
+# Get runs by technique
+curl http://localhost:8000/api/runs?technique=rag
+
+# Get specific run by ID
+curl http://localhost:8000/api/runs/{run_id}
+
+# Get run history statistics
+curl http://localhost:8000/api/runs/stats
+
+# Compare multiple runs
+curl -X POST http://localhost:8000/api/runs/compare \
+  -H "Content-Type: application/json" \
+  -d '{
+    "run_ids": ["run-id-1", "run-id-2", "run-id-3"]
+  }'
+
+# Clear run history
+curl -X DELETE http://localhost:8000/api/runs
+```
+
+**Example Experimentation Workflow:**
+```bash
+# 1. Get baseline configuration
+CONFIG_BASELINE=$(curl -s http://localhost:8000/api/config/presets/baseline)
+
+# 2. Run query with baseline
+curl -X POST http://localhost:8000/api/chat \
+  -H "Content-Type: application/json" \
+  -d "{\"message\": \"Explain RAG\", \"config\": $CONFIG_BASELINE}"
+
+# 3. Get RAG configuration
+CONFIG_RAG=$(curl -s http://localhost:8000/api/config/presets/basic_rag)
+
+# 4. Run same query with RAG
+curl -X POST http://localhost:8000/api/chat \
+  -H "Content-Type: application/json" \
+  -d "{\"message\": \"Explain RAG\", \"config\": $CONFIG_RAG}"
+
+# 5. Get run history
+curl http://localhost:8000/api/runs
+
+# 6. Compare runs (use actual run IDs from step 5)
+curl -X POST http://localhost:8000/api/runs/compare \
+  -H "Content-Type: application/json" \
+  -d '{"run_ids": ["<baseline-run-id>", "<rag-run-id>"]}'
+```
+
+For complete API documentation, see [docs/PHASE2_API_DOCUMENTATION.md](docs/PHASE2_API_DOCUMENTATION.md).
 
 ### Testing Individual Tools
 
@@ -422,4 +648,4 @@ ls context_engineering_agent/  # Should show agent.py and __init__.py
 
 **Note**: This project uses local models for zero-cost experimentation. All metrics are reproducible on consumer hardware.
 
-*Last Updated: Phase 1.5 Complete - Architecture Shift to Modular Platform - 2025-11-03*
+*Last Updated: Phase 2 Complete - Modular Platform Infrastructure with Configuration System, Run History, and Comparison Framework - 2025-11-05*
