@@ -1,4 +1,4 @@
-import { Brain, MessageSquare, BarChart3, Home } from 'lucide-react'
+import { Brain, MessageSquare, BarChart3, Home, Database } from 'lucide-react'
 import { Link, useLocation } from 'react-router-dom'
 import {
   Sidebar,
@@ -19,6 +19,7 @@ const navItems = [
   { path: '/', label: 'Home', icon: Home },
   { path: '/chat', label: 'Chat', icon: MessageSquare },
   { path: '/metrics', label: 'Metrics', icon: BarChart3 },
+  { path: '/vector-store', label: 'Vector Store', icon: Database },
 ]
 
 export function AppSidebar() {
@@ -38,7 +39,7 @@ export function AppSidebar() {
           <Brain className="h-6 w-6 text-primary" />
           <div className="flex flex-col">
             <span className="text-lg font-bold">Context Engineering</span>
-            <span className="text-xs text-muted-foreground">Phase 1.5</span>
+            <span className="text-xs text-muted-foreground">Phase 3</span>
           </div>
         </div>
       </SidebarHeader>

@@ -6,6 +6,7 @@ import { Layout } from './components/layout/Layout'
 import { Home } from './pages/Home'
 import { Chat } from './pages/Chat'
 import { Metrics } from './pages/Metrics'
+import VectorStore from './pages/VectorStore'
 import { NotFound } from './pages/NotFound'
 
 function App() {
@@ -19,6 +20,7 @@ function App() {
                 <Route index element={<Home />} />
                 <Route path="chat" element={<Chat />} />
                 <Route path="metrics" element={<Metrics />} />
+                <Route path="vector-store" element={<VectorStore />} />
                 <Route path="*" element={<NotFound />} />
               </Route>
             </Routes>
