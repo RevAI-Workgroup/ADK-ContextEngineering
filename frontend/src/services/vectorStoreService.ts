@@ -4,7 +4,7 @@
  * Handles all vector store and document management API calls
  */
 
-import api from './api';
+import { api } from './api';
 
 export interface VectorStoreStats {
   total_documents: number;
