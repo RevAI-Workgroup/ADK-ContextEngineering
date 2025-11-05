@@ -86,7 +86,7 @@ Track comprehensive metrics:
 ### Basic Usage: Chat
 
 1. **Start the application** (see Quick Start above)
-2. **Navigate to Chat page** at http://localhost:5173
+2. **Navigate to Chat page** at <http://localhost:5173>
 3. **Type a question** and press Enter
 4. **See the response** with thinking process and tool usage
 
