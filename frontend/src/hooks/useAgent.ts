@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from 'react'
 import { agentService } from '../services/agentService'
 import { AgentResponse } from '../types/agent.types'
+import { ContextEngineeringConfig } from '../types/config.types'
 
 export function useAgent() {
   const [loading, setLoading] = useState(false)
@@ -12,7 +13,13 @@ export function useAgent() {
   const requestIdRef = useRef(0)
 
   const sendMessage = useCallback(
-    async (message: string, sessionId?: string, includeThinking: boolean = true, model?: string | null) => {
+    async (
+      message: string, 
+      sessionId?: string, 
+      includeThinking: boolean = true, 
+      model?: string | null,
+      config?: ContextEngineeringConfig
+    ) => {
       // Cancel previous request if still pending
       if (abortControllerRef.current) {
         abortControllerRef.current.abort()
@@ -35,6 +42,7 @@ export function useAgent() {
           sessionId,
           includeThinking,
           model,
+          config,
           abortController.signal
         )
         

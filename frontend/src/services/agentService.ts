@@ -1,5 +1,6 @@
 import { api } from './api'
 import { AgentResponse, Tool } from '../types/agent.types'
+import { ContextEngineeringConfig } from '../types/config.types'
 
 export const agentService = {
   /**
@@ -10,6 +11,7 @@ export const agentService = {
     sessionId?: string,
     includeThinking: boolean = true,
     model?: string | null,
+    config?: ContextEngineeringConfig,
     signal?: AbortSignal
   ): Promise<AgentResponse> {
     const response = await api.post<AgentResponse>(
@@ -19,6 +21,7 @@ export const agentService = {
         session_id: sessionId,
         include_thinking: includeThinking,
         model: model || undefined,
+        config: config || undefined,
       },
       {
         signal,

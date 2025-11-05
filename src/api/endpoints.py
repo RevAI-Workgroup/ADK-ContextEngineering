@@ -16,6 +16,14 @@ import asyncio
 
 from src.api.adk_wrapper import ADKAgentWrapper
 from src.evaluation.metrics import MetricsCollector
+from src.core.context_config import (
+    ContextEngineeringConfig, 
+    ConfigPreset,
+    get_default_config,
+    get_preset_configs,
+    get_preset_names
+)
+from src.memory.run_history import RunRecord, get_run_history_manager
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +32,8 @@ chat_router = APIRouter()
 metrics_router = APIRouter()
 tools_router = APIRouter()
 models_router = APIRouter()
+runs_router = APIRouter()
+config_router = APIRouter()
 
 
 # ============================================================================
@@ -55,6 +65,7 @@ class ChatMessage(BaseModel):
     session_id: Optional[str] = Field(None, description="Session ID for conversation tracking")
     include_thinking: bool = Field(True, description="Include agent thinking process in response")
     model: Optional[str] = Field(None, description="LLM model to use for this message")
+    config: Optional[Dict[str, Any]] = Field(None, description="Context engineering configuration")
 
 
 class ChatResponse(BaseModel):
@@ -95,12 +106,54 @@ async def chat(
     )
     
     try:
-        # Process message through ADK agent with specified model
+        # Parse config if provided
+        context_config = None
+        if message.config:
+            try:
+                context_config = ContextEngineeringConfig.from_dict(message.config)
+            except (ValueError, TypeError, KeyError) as config_error:
+                error_msg = f"Invalid configuration: {str(config_error)}"
+                logger.error(
+                    "Configuration parsing failed: %s. Config data: %s",
+                    config_error,
+                    message.config,
+                    exc_info=True
+                )
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "error": "invalid_configuration",
+                        "message": error_msg,
+                        "details": str(config_error)
+                    }
+                )
+            
+            # Validate configuration
+            validation_errors = context_config.validate()
+            if validation_errors:
+                error_msg = f"Configuration validation failed: {validation_errors}"
+                logger.error(
+                    "Configuration validation failed: %s. Config data: %s",
+                    validation_errors,
+                    message.config,
+                    exc_info=True
+                )
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "error": "invalid_configuration",
+                        "message": error_msg,
+                        "details": str(validation_errors)
+                    }
+                )
+        
+        # Process message through ADK agent with specified model and config
         result = await adk_wrapper.process_message(
             message=message.message,
             session_id=message.session_id,
             include_thinking=message.include_thinking,
-            model=message.model
+            model=message.model,
+            config=context_config
         )
         
         # Collect metrics
@@ -117,7 +170,7 @@ async def chat(
         
     except Exception as e:
         logger.error(f"Error processing chat message: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @chat_router.websocket("/chat/ws")
@@ -181,11 +234,57 @@ async def chat_websocket(websocket: WebSocket):
             selected_model = message_data.get("selectedModel")
             logger.info(f"Processing WebSocket message with model: {selected_model or 'default'}")
             
+            # Parse config if provided
+            context_config = None
+            if message_data.get("config"):
+                try:
+                    context_config = ContextEngineeringConfig.from_dict(message_data["config"])
+                except (ValueError, TypeError, KeyError) as config_error:
+                    error_msg = f"Invalid configuration: {str(config_error)}"
+                    logger.error(
+                        "WebSocket configuration parsing failed: %s. Config data: %s",
+                        config_error,
+                        message_data.get("config"),
+                        exc_info=True
+                    )
+                    await websocket.send_json({
+                        "type": "error",
+                        "data": {
+                            "error": "invalid_configuration",
+                            "message": error_msg,
+                            "details": str(config_error)
+                        },
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    })
+                    continue
+                
+                # Validate configuration
+                validation_errors = context_config.validate()
+                if validation_errors:
+                    error_msg = f"Configuration validation failed: {validation_errors}"
+                    logger.error(
+                        "WebSocket configuration validation failed: %s. Config data: %s",
+                        validation_errors,
+                        message_data.get("config"),
+                        exc_info=True
+                    )
+                    await websocket.send_json({
+                        "type": "error",
+                        "data": {
+                            "error": "invalid_configuration",
+                            "message": error_msg,
+                            "details": str(validation_errors)
+                        },
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    })
+                    continue
+            
             # Process message with streaming
             async for event in adk_wrapper.process_message_stream(
                 message=message_data["message"],
                 session_id=message_data.get("session_id"),
-                model=selected_model
+                model=selected_model,
+                config=context_config
             ):
                 await websocket.send_json({
                     "type": event["type"],
@@ -557,4 +656,364 @@ async def clear_running_models():
     except Exception as e:
         logger.error(f"Error clearing models: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# RUN HISTORY ENDPOINTS
+# ============================================================================
+
+@runs_router.get("/runs")
+async def get_runs(
+    limit: Optional[int] = None,
+    query: Optional[str] = None,
+    technique: Optional[str] = None,
+    model: Optional[str] = None
+):
+    """
+    Get recent runs from history.
+    
+    Query parameters:
+    - limit: Maximum number of runs to return (default: all)
+    - query: Filter by query text (case-insensitive substring match)
+    - technique: Filter by enabled technique (e.g., 'rag', 'compression')
+    - model: Filter by model identifier
+    """
+    try:
+        history_manager = get_run_history_manager()
+        
+        # Get runs based on filters
+        if query:
+            runs = history_manager.get_runs_by_query(query, case_sensitive=False)
+        elif technique:
+            runs = history_manager.get_runs_by_technique(technique)
+        elif model:
+            runs = history_manager.get_runs_by_model(model)
+        else:
+            runs = history_manager.get_recent_runs(limit=limit)
+        
+        # Always apply limit after fetching runs (regardless of filters used)
+        if limit is not None and limit > 0:
+            runs = runs[:limit]
+        
+        return {
+            "runs": [run.to_dict() for run in runs],
+            "count": len(runs),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error fetching runs: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@runs_router.get("/runs/{run_id}")
+async def get_run_by_id(run_id: str):
+    """
+    Get a specific run by ID.
+    
+    Args:
+        run_id: UUID of the run to retrieve
+    """
+    try:
+        history_manager = get_run_history_manager()
+        run = history_manager.get_run_by_id(run_id)
+        
+        if run is None:
+            raise HTTPException(status_code=404, detail=f"Run with ID '{run_id}' not found")
+        
+        return {
+            "run": run.to_dict(),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching run by ID: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@runs_router.post("/runs/clear")
+async def clear_runs():
+    """
+    Clear all run history.
+    
+    This is a destructive operation that removes all stored runs.
+    """
+    try:
+        history_manager = get_run_history_manager()
+        history_manager.clear_history()
+        
+        logger.info("Run history cleared")
+        
+        return {
+            "success": True,
+            "message": "Run history cleared successfully",
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error clearing runs: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@runs_router.get("/runs/compare")
+async def compare_runs(run_ids: str):
+    """
+    Compare multiple runs.
+    
+    Query parameters:
+    - run_ids: Comma-separated list of run IDs to compare
+    
+    Example: /api/runs/compare?run_ids=abc123,def456,ghi789
+    """
+    try:
+        history_manager = get_run_history_manager()
+        
+        # Parse run IDs
+        id_list = [rid.strip() for rid in run_ids.split(",") if rid.strip()]
+        
+        if len(id_list) < 2:
+            raise HTTPException(
+                status_code=400,
+                detail="At least 2 run IDs are required for comparison"
+            )
+        
+        # Fetch all runs
+        runs = []
+        missing_ids = []
+        for run_id in id_list:
+            run = history_manager.get_run_by_id(run_id)
+            if run:
+                runs.append(run)
+            else:
+                missing_ids.append(run_id)
+        
+        if missing_ids:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Runs not found: {', '.join(missing_ids)}"
+            )
+        
+        # Build comparison data
+        comparison = {
+            "runs": [run.to_dict() for run in runs],
+            "query": runs[0].query if runs else None,  # Assumes same query
+            "metrics_comparison": _compare_run_metrics(runs),
+            "config_comparison": _compare_run_configs(runs),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+        
+        return comparison
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error comparing runs: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+def _compare_run_metrics(runs: List[RunRecord]) -> Dict[str, Any]:
+    """
+    Compare metrics across multiple runs.
+    
+    Returns a structured comparison showing metrics for each run.
+    """
+    metrics_comparison = {}
+    
+    for run in runs:
+        run_metrics = {}
+        for key, value in run.metrics.items():
+            if isinstance(value, (int, float)):
+                run_metrics[key] = value
+        
+        metrics_comparison[run.id] = {
+            "run_id": run.id,
+            "duration_ms": run.duration_ms,
+            "enabled_techniques": run.enabled_techniques,
+            "metrics": run_metrics
+        }
+    
+    return metrics_comparison
+
+
+def _compare_run_configs(runs: List[RunRecord]) -> Dict[str, Any]:
+    """
+    Compare configurations across multiple runs.
+    
+    Highlights differences in enabled techniques and their settings.
+    """
+    config_comparison = {}
+    
+    for run in runs:
+        config_comparison[run.id] = {
+            "run_id": run.id,
+            "enabled_techniques": run.enabled_techniques,
+            "model": run.model,
+            "config": run.config
+        }
+    
+    return config_comparison
+
+
+@runs_router.get("/runs/stats")
+async def get_run_stats():
+    """
+    Get statistics about the run history.
+    
+    Returns summary information including:
+    - Total number of runs
+    - Models used
+    - Techniques used
+    - Date range
+    - Average duration
+    """
+    try:
+        history_manager = get_run_history_manager()
+        stats = history_manager.get_history_stats()
+        
+        return {
+            "stats": stats,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error fetching run stats: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+# ============================================================================
+# CONFIG ENDPOINTS
+# ============================================================================
+
+@config_router.get("/config/default")
+async def get_default_configuration():
+    """
+    Get the default context engineering configuration.
+    
+    This is the baseline configuration with all techniques disabled.
+    """
+    try:
+        config = get_default_config()
+        return {
+            "config": config.to_dict(),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error getting default config: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@config_router.get("/config/presets")
+async def get_configuration_presets():
+    """
+    Get all available configuration presets.
+    
+    Returns:
+    - baseline: All techniques disabled
+    - basic_rag: Only RAG enabled
+    - advanced_rag: RAG + reranking + hybrid search
+    - full_stack: All techniques enabled
+    """
+    try:
+        preset_names = get_preset_names()
+        presets = get_preset_configs()
+        
+        return {
+            "presets": {
+                name: config.to_dict()
+                for name, config in presets.items()
+            },
+            "preset_names": preset_names,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error getting config presets: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@config_router.get("/config/presets/{preset_name}")
+async def get_preset_configuration(preset_name: str):
+    """
+    Get a specific configuration preset by name.
+    
+    Args:
+        preset_name: Name of the preset (baseline, basic_rag, advanced_rag, full_stack)
+    """
+    try:
+        # Validate preset name
+        valid_presets = get_preset_names()
+        if preset_name not in valid_presets:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Preset '{preset_name}' not found. Valid presets: {', '.join(valid_presets)}"
+            )
+        
+        preset_enum = ConfigPreset(preset_name)
+        config = ContextEngineeringConfig.from_preset(preset_enum)
+        
+        return {
+            "preset": preset_name,
+            "config": config.to_dict(),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting preset config: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+class ConfigValidationRequest(BaseModel):
+    """Request to validate a configuration."""
+    config: Dict[str, Any] = Field(..., description="Configuration to validate")
+
+
+@config_router.post("/config/validate")
+async def validate_configuration(request: ConfigValidationRequest):
+    """
+    Validate a context engineering configuration.
+    
+    Returns validation errors if any, or success message if valid.
+    """
+    try:
+        # Parse configuration
+        try:
+            config = ContextEngineeringConfig.from_dict(request.config)
+        except (ValueError, TypeError, KeyError) as config_error:
+            error_msg = f"Configuration parsing failed: {str(config_error)}"
+            logger.error(
+                "Config validation - parsing failed: %s. Config data: %s",
+                config_error,
+                request.config,
+                exc_info=True
+            )
+            return {
+                "valid": False,
+                "errors": [{
+                    "field": "config",
+                    "message": error_msg,
+                    "details": str(config_error)
+                }],
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+        
+        # Validate
+        errors = config.validate()
+        
+        if errors:
+            return {
+                "valid": False,
+                "errors": errors,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+        else:
+            return {
+                "valid": True,
+                "message": "Configuration is valid",
+                "enabled_techniques": config.get_enabled_techniques(),
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+    except Exception as e:
+        logger.error(f"Error validating config: {e}", exc_info=True)
+        return {
+            "valid": False,
+            "errors": [f"Configuration parsing error: {str(e)}"],
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
 
