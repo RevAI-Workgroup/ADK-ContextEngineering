@@ -16,6 +16,7 @@ export function Chat() {
   const { clearChat, messages, config, setConfig } = useChatContext()
   const [isClearing, setIsClearing] = useState(false)
   const [clearMessage, setClearMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
+  const [rerunMessage, setRerunMessage] = useState<{ query: string } | null>(null)
   const [isToolsExpanded, setIsToolsExpanded] = useState(false)
   const [showConfigPanel, setShowConfigPanel] = useState(false)
   const [showRunHistory, setShowRunHistory] = useState(false)
@@ -31,6 +32,14 @@ export function Chat() {
       return () => clearTimeout(timer)
     }
   }, [clearMessage])
+
+  // Auto-dismiss rerun messages after 10 seconds with proper cleanup
+  useEffect(() => {
+    if (rerunMessage) {
+      const timer = setTimeout(() => setRerunMessage(null), 10000)
+      return () => clearTimeout(timer)
+    }
+  }, [rerunMessage])
 
   // Handle click outside configuration panel
   useEffect(() => {
@@ -94,10 +103,12 @@ export function Chat() {
     setShowComparison(true)
   }
 
-  const handleRerunWithConfig = (_query: string, newConfig: any) => {
+  const handleRerunWithConfig = (query: string, newConfig: any) => {
     setConfig(newConfig)
-    // The user will need to manually send the query
-    // We could potentially auto-fill the input, but for now just update config
+    // Show notification to inform user that config has been applied
+    setRerunMessage({ query })
+    // Scroll to top so user sees the message
+    window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
   return (
@@ -183,6 +194,32 @@ export function Chat() {
                 size="icon"
                 className="h-6 w-6 -mr-2"
                 onClick={() => setClearMessage(null)}
+                aria-label="Dismiss message"
+              >
+                <XCircle className="h-4 w-4" />
+              </Button>
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {/* Rerun Configuration Applied Message */}
+        {rerunMessage && (
+          <Alert className="w-full border-blue-500 bg-blue-50 dark:bg-blue-950">
+            <AlertDescription className="flex items-center justify-between">
+              <div className="flex flex-col gap-1">
+                <span className="font-semibold">Configuration applied from previous run</span>
+                <span className="text-sm text-muted-foreground">
+                  Original query: "{rerunMessage.query.substring(0, 80)}{rerunMessage.query.length > 80 ? '...' : ''}"
+                </span>
+                <span className="text-sm text-muted-foreground">
+                  You can now send your query below with the loaded configuration.
+                </span>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 -mr-2 flex-shrink-0"
+                onClick={() => setRerunMessage(null)}
                 aria-label="Dismiss message"
               >
                 <XCircle className="h-4 w-4" />

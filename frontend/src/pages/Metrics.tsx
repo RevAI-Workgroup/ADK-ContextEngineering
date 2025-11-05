@@ -328,6 +328,12 @@ function RunComparisonCharts({ runComparison }: RunComparisonChartsProps) {
     }
 
     const baseline = metricComparison.values[0]
+
+    // Skip metrics where baseline is zero to avoid Infinity/NaN in percentage calculations
+    if (Math.abs(baseline) < 1e-9) {
+      return null
+    }
+
     const deltas = metricComparison.values.map((value: number, index: number) => {
       if (index === 0) return 0
       const percentChange = ((value - baseline) / baseline) * 100
