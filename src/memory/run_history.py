@@ -16,6 +16,37 @@ import threading
 from contextlib import contextmanager
 
 
+def _parse_timestamp(timestamp: str) -> datetime:
+    """
+    Parse ISO timestamp into timezone-aware UTC datetime.
+    
+    Handles:
+    - Timestamps with 'Z' suffix (converts to +00:00)
+    - Timestamps with explicit timezone offset
+    - Naive timestamps (assumes UTC)
+    
+    Args:
+        timestamp: ISO format timestamp string
+        
+    Returns:
+        Timezone-aware datetime in UTC for consistent comparison.
+    """
+    # Replace 'Z' suffix with '+00:00' for ISO parsing
+    if timestamp.endswith('Z'):
+        timestamp = timestamp[:-1] + '+00:00'
+    
+    dt = datetime.fromisoformat(timestamp)
+    
+    # If naive datetime (no timezone), treat as UTC
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        # Convert any timezone-aware datetime to UTC for normalization
+        dt = dt.astimezone(timezone.utc)
+    
+    return dt
+
+
 @dataclass
 class RunRecord:
     """
@@ -325,7 +356,7 @@ class RunHistoryManager:
             for run in runs:
                 all_techniques.update(run.enabled_techniques)
 
-            timestamps = [datetime.fromisoformat(run.timestamp) for run in runs]
+            timestamps = [_parse_timestamp(run.timestamp) for run in runs]
             min_time = min(timestamps)
             max_time = max(timestamps)
 
@@ -390,22 +421,7 @@ class RunHistoryManager:
                 # Parse timestamps to datetime objects for proper chronological ordering
                 all_runs = list(run_dict.values())
 
-                def get_timestamp_dt(run: RunRecord) -> datetime:
-                    """Parse run timestamp into timezone-aware datetime."""
-                    dt = datetime.fromisoformat(run.timestamp)
-                    # If naive datetime, treat as UTC
-                    if dt.tzinfo is None:
-                        dt = dt.replace(tzinfo=timezone.utc)
-                    return dt
-
-#                all_runs.sort(key=get_timestamp_dt, reverse=True)
-#                all_runs.sort(key=lambda r: r.timestamp, reverse=True)
-                all_runs.sort(
-                    key=lambda r: datetime.fromisoformat(
-                        r.timestamp.replace("Z", "+00:00")
-                    ),
-                    reverse=True,
-                )
+                all_runs.sort(key=lambda run: _parse_timestamp(run.timestamp), reverse=True)
                 # Keep only max_runs
                 all_runs = all_runs[: self.max_runs]
                 self._write_history(all_runs)

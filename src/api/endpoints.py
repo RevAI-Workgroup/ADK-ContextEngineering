@@ -127,6 +127,25 @@ async def chat(
                         "details": str(config_error)
                     }
                 )
+            
+            # Validate configuration
+            validation_errors = context_config.validate()
+            if validation_errors:
+                error_msg = f"Configuration validation failed: {validation_errors}"
+                logger.error(
+                    "Configuration validation failed: %s. Config data: %s",
+                    validation_errors,
+                    message.config,
+                    exc_info=True
+                )
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "error": "invalid_configuration",
+                        "message": error_msg,
+                        "details": str(validation_errors)
+                    }
+                )
         
         # Process message through ADK agent with specified model and config
         result = await adk_wrapper.process_message(
@@ -234,6 +253,27 @@ async def chat_websocket(websocket: WebSocket):
                             "error": "invalid_configuration",
                             "message": error_msg,
                             "details": str(config_error)
+                        },
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    })
+                    continue
+                
+                # Validate configuration
+                validation_errors = context_config.validate()
+                if validation_errors:
+                    error_msg = f"Configuration validation failed: {validation_errors}"
+                    logger.error(
+                        "WebSocket configuration validation failed: %s. Config data: %s",
+                        validation_errors,
+                        message_data.get("config"),
+                        exc_info=True
+                    )
+                    await websocket.send_json({
+                        "type": "error",
+                        "data": {
+                            "error": "invalid_configuration",
+                            "message": error_msg,
+                            "details": str(validation_errors)
                         },
                         "timestamp": datetime.now(timezone.utc).isoformat()
                     })

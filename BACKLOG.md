@@ -393,46 +393,46 @@ context-engineering-sandbox/
 - [x] Add `POST /api/config/validate` - Validate configuration object
 - [x] Add `GET /api/config/default` - Get default configuration
 
-### Frontend Configuration Panel
-- [ ] Create `frontend/src/components/chat/ConfigurationPanel.tsx`
-- [ ] Implement collapsible panel with two tabs: "Simple" and "Advanced"
-- [ ] Simple tab: Toggle switches for each technique (6 switches)
-- [ ] Simple tab: Preset selector dropdown with "Apply Preset" button
-- [ ] Advanced tab: Accordion sections for each enabled technique
-- [ ] Advanced tab: Detailed controls (sliders, inputs, dropdowns) per technique
-- [ ] Add "Reset to Default" button
-- [ ] Implement real-time validation feedback
-- [ ] Update `frontend/src/contexts/ChatContext.tsx` to manage config state
-- [ ] Add config persistence in localStorage
+### Frontend Configuration Panel ✅ COMPLETE
+- [x] Create `frontend/src/components/chat/ConfigurationPanel.tsx`
+- [x] Implement collapsible panel with two tabs: "Simple" and "Advanced"
+- [x] Simple tab: Toggle switches for each technique (6 switches)
+- [x] Simple tab: Preset selector dropdown with "Apply Preset" button
+- [x] Advanced tab: Accordion sections for each enabled technique
+- [x] Advanced tab: Detailed controls (sliders, inputs, dropdowns) per technique
+- [x] Add "Reset to Default" button
+- [x] Implement real-time validation feedback
+- [x] Update `frontend/src/contexts/ChatContext.tsx` to manage config state
+- [x] Add config persistence in localStorage
 
-### Frontend Run History & Comparison
-- [ ] Create `frontend/src/components/chat/RunHistory.tsx` sidebar
-- [ ] Display last 8 runs with: query preview, config badges, timestamp, key metrics
-- [ ] Add checkboxes for run selection
-- [ ] Implement filter by query text
-- [ ] Add "Clear History" button with confirmation dialog
-- [ ] Add "Re-run with different config" button (pre-fills query)
-- [ ] Create `frontend/src/components/chat/RunComparison.tsx` modal
-- [ ] Implement side-by-side comparison table showing:
+### Frontend Run History & Comparison ✅ COMPLETE
+- [x] Create `frontend/src/components/chat/RunHistory.tsx` sidebar
+- [x] Display last 8 runs with: query preview, config badges, timestamp, key metrics
+- [x] Add checkboxes for run selection
+- [x] Implement filter by query text
+- [x] Add "Clear History" button with confirmation dialog
+- [x] Add "Re-run with different config" button (pre-fills query)
+- [x] Create `frontend/src/components/chat/RunComparison.tsx` modal
+- [x] Implement side-by-side comparison table showing:
   - Query (same for all selected runs)
   - Configuration differences (highlighted)
   - Response text (scrollable)
   - Metrics comparison (color-coded: green=better, red=worse)
-- [ ] Add "Export comparison as JSON" functionality
-- [ ] Add "Run new variation" button
-- [ ] Update `frontend/src/pages/Chat.tsx` to integrate new components
+- [x] Add "Export comparison as JSON" functionality
+- [x] Add "Run new variation" button
+- [x] Update `frontend/src/pages/Chat.tsx` to integrate new components
 
-### Frontend Services & Types
-- [ ] Create `frontend/src/types/config.types.ts` with interfaces:
+### Frontend Services & Types ✅ COMPLETE
+- [x] Create `frontend/src/types/config.types.ts` with interfaces:
   - `ContextEngineeringConfig`
   - `TechniqueConfig` (detailed settings per technique)
   - `ConfigPreset`
-- [ ] Create `frontend/src/types/run.types.ts` with interfaces:
+- [x] Create `frontend/src/types/run.types.ts` with interfaces:
   - `RunRecord`
   - `RunComparison`
-- [ ] Create `frontend/src/services/configService.ts` with API calls:
+- [x] Create `frontend/src/services/configService.ts` with API calls:
   - `getPresets()`, `validateConfig()`, `getDefaultConfig()`
-- [ ] Create `frontend/src/services/runHistoryService.ts` with API calls:
+- [x] Create `frontend/src/services/runHistoryService.ts` with API calls:
   - `getRecentRuns()`, `getRunById()`, `clearHistory()`, `compareRuns()`
 
 ### Frontend Metrics Page Updates
