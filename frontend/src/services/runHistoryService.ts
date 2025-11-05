@@ -4,7 +4,7 @@
  * Handles API calls for agent run history management and comparison
  */
 
-import api from './api'
+import { api } from './api'
 import { RunRecord, RunComparison, RunHistoryStats } from '../types/run.types'
 
 export const runHistoryService = {
