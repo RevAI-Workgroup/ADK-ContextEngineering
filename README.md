@@ -91,7 +91,7 @@ Track comprehensive metrics:
 4. **See the response** with thinking process and tool usage
 
 **Example queries:**
-```
+```text
 What is 15 multiplied by 7?
 Analyze this text: The quick brown fox jumps
 What time is it in Tokyo?
@@ -149,7 +149,7 @@ On the Chat page:
 - ✅ Are you over-engineering? (Do you need all techniques?)
 
 **Example Results:**
-```
+```text
 Run 1: Baseline          → Accuracy: 0.85, Latency: 800ms
 Run 2: +RAG              → Accuracy: 0.95 (+10%), Latency: 1200ms
 Run 3: +RAG +Compression → Accuracy: 0.93 (-2%), Tokens: -22%, Latency: 1000ms
@@ -320,7 +320,7 @@ See [docs/PHASE2_API_DOCUMENTATION.md](docs/PHASE2_API_DOCUMENTATION.md) for com
 
 ### Project Structure
 
-```
+```text
 context-engineering-sandbox/
 ├── frontend/              # React Web UI
 │   ├── src/
