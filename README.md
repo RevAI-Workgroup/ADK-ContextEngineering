@@ -35,7 +35,7 @@ pip install -r requirements.txt
 ./start-dev.sh  # Starts both backend and frontend
 
 # 5. Open your browser
-# Visit http://localhost:5173
+# Visit <http://localhost:5173>
 ```
 
 **That's it!** You now have a running LLM experimentation platform.
