@@ -58,14 +58,14 @@ export function Home() {
             <BarChart3 className="h-12 w-12 text-primary mb-4" />
             <CardTitle>Metrics Dashboard</CardTitle>
             <CardDescription>
-              Track and compare performance across different context engineering phases
+              Compare runs with different configurations to measure technique impact
             </CardDescription>
           </CardHeader>
           <CardContent>
             <ul className="space-y-2 text-sm">
-              <li>✓ Real-time metrics</li>
-              <li>✓ Phase comparisons</li>
-              <li>✓ Visual analytics</li>
+              <li>✓ Run comparison analytics</li>
+              <li>✓ Technique impact visualization</li>
+              <li>✓ Configuration-based filtering</li>
             </ul>
           </CardContent>
         </Card>
@@ -83,7 +83,7 @@ export function Home() {
           <div className="space-y-4">
             <PhaseItem
               phase="Phase 0"
-              title="Foundation & Benchmarking"
+              title="Foundation & Benchmarking Setup"
               status="complete"
               description="Evaluation framework and baseline metrics"
             />
@@ -96,14 +96,38 @@ export function Home() {
             <PhaseItem
               phase="Phase 1.5"
               title="Web UI Development"
-              status="current"
+              status="complete"
               description="React frontend with AG-UI integration"
             />
             <PhaseItem
               phase="Phase 2"
-              title="Basic RAG Implementation"
+              title="Modular Platform Infrastructure"
+              status="complete"
+              description="Toggleable architecture for technique comparison"
+            />
+            <PhaseItem
+              phase="Phase 3"
+              title="RAG Module Implementation"
               status="upcoming"
               description="Vector database and retrieval-augmented generation"
+            />
+            <PhaseItem
+              phase="Phase 4"
+              title="Compression & Caching Modules"
+              status="upcoming"
+              description="Context compression and semantic caching"
+            />
+            <PhaseItem
+              phase="Phase 5"
+              title="Reranking & Hybrid Search"
+              status="upcoming"
+              description="Advanced retrieval techniques"
+            />
+            <PhaseItem
+              phase="Phase 6"
+              title="Advanced Technique Modules"
+              status="upcoming"
+              description="Graph RAG, adaptive chunking, query routing"
             />
           </div>
         </CardContent>
