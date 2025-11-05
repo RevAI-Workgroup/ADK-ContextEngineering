@@ -16,7 +16,7 @@ interface ChatInterfaceProps {
 }
 
 export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
-  const { messages, setMessages, isProcessing, setIsProcessing, errorMessage, setErrorMessage, selectedModel } = useChatContext()
+  const { messages, setMessages, isProcessing, setIsProcessing, errorMessage, setErrorMessage, selectedModel, config } = useChatContext()
 
   // WebSocket for real-time streaming
   const { isConnected, events, connect, sendMessage: sendWsMessage, clearEvents } = useWebSocket()
@@ -180,7 +180,7 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
         // Note: isProcessing will be set to false in the useEffect when 'complete' event is received
       } else {
         // Use HTTP for synchronous request
-        const response = await sendHttpMessage(content, undefined, true, selectedModel)
+        const response = await sendHttpMessage(content, undefined, true, selectedModel, config)
 
         const assistantMessage: Message = {
           id: Date.now().toString(),
