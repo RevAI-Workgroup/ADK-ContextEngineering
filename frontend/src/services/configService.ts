@@ -4,7 +4,7 @@
  * Handles API calls for context engineering configuration management
  */
 
-import api from './api'
+import { api } from './api'
 import { ContextEngineeringConfig, ConfigValidationResponse, ConfigPresetsResponse } from '../types/config.types'
 
 export const configService = {
