@@ -192,6 +192,9 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
           toolCalls: response.tool_calls,
           timestamp: response.timestamp,
           model: response.model,
+          pipelineMetadata: response.pipeline_metadata,
+          pipelineMetrics: response.pipeline_metrics,
+          metrics: response.metrics,
         }
 
         setMessages((prev) => [...prev, assistantMessage])

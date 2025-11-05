@@ -5,13 +5,24 @@
  * src/core/context_config.py
  */
 
-export interface RAGConfig {
+export interface NaiveRAGConfig {
   enabled: boolean
   chunk_size: number
   chunk_overlap: number
   top_k: number
   similarity_threshold: number
   embedding_model: string
+}
+
+export interface RAGToolConfig {
+  enabled: boolean
+  chunk_size: number
+  chunk_overlap: number
+  top_k: number
+  similarity_threshold: number
+  embedding_model: string
+  tool_name: string
+  tool_description: string
 }
 
 export interface CompressionConfig {
@@ -51,7 +62,8 @@ export interface MemoryConfig {
 }
 
 export interface ContextEngineeringConfig {
-  rag: RAGConfig
+  naive_rag: NaiveRAGConfig
+  rag_tool: RAGToolConfig
   compression: CompressionConfig
   reranking: RerankingConfig
   caching: CachingConfig
@@ -83,13 +95,23 @@ export interface ConfigPresetsResponse {
 
 // Default configuration factory
 export const createDefaultConfig = (): ContextEngineeringConfig => ({
-  rag: {
+  naive_rag: {
     enabled: false,
     chunk_size: 512,
     chunk_overlap: 50,
     top_k: 5,
-    similarity_threshold: 0.7,
+    similarity_threshold: 0.2,
     embedding_model: 'sentence-transformers/all-MiniLM-L6-v2',
+  },
+  rag_tool: {
+    enabled: false,
+    chunk_size: 512,
+    chunk_overlap: 50,
+    top_k: 5,
+    similarity_threshold: 0.2,
+    embedding_model: 'sentence-transformers/all-MiniLM-L6-v2',
+    tool_name: 'search_knowledge_base',
+    tool_description: 'Search the knowledge base for relevant information about a specific topic or question',
   },
   compression: {
     enabled: false,
@@ -129,7 +151,8 @@ export const createDefaultConfig = (): ContextEngineeringConfig => ({
 
 // Technique display names
 export const TECHNIQUE_NAMES: Record<string, string> = {
-  rag: 'RAG',
+  naive_rag: 'Naive RAG',
+  rag_tool: 'RAG-as-tool',
   compression: 'Compression',
   reranking: 'Reranking',
   caching: 'Caching',
@@ -139,7 +162,8 @@ export const TECHNIQUE_NAMES: Record<string, string> = {
 
 // Technique descriptions
 export const TECHNIQUE_DESCRIPTIONS: Record<string, string> = {
-  rag: 'Retrieval-Augmented Generation - Retrieve relevant documents from a vector database',
+  naive_rag: 'Naive RAG - Automatically retrieve and inject relevant documents into context before every LLM call',
+  rag_tool: 'RAG-as-tool - Provide the LLM with a retrieval tool it can choose to invoke when needed',
   compression: 'Context Compression - Reduce context size while preserving key information',
   reranking: 'Document Reranking - Reorder retrieved documents for better relevance',
   caching: 'Semantic Caching - Cache similar queries to reduce latency and cost',

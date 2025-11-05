@@ -45,7 +45,7 @@ export interface UploadResponse {
  * Get vector store statistics
  */
 export const getVectorStoreStats = async (): Promise<VectorStoreStats> => {
-  const response = await api.get('/vector-store/stats');
+  const response = await api.get('/api/vector-store/stats');
   return response.data;
 };
 
@@ -57,7 +57,7 @@ export const searchVectorStore = async (
   topK: number = 5,
   similarityThreshold: number = 0.7
 ): Promise<{ results: SearchResult[]; count: number; query: string }> => {
-  const response = await api.get('/vector-store/search', {
+  const response = await api.get('/api/vector-store/search', {
     params: {
       query,
       top_k: topK,
@@ -71,7 +71,7 @@ export const searchVectorStore = async (
  * Clear the vector store
  */
 export const clearVectorStore = async (): Promise<{ success: boolean; message: string }> => {
-  const response = await api.post('/vector-store/clear');
+  const response = await api.post('/api/vector-store/clear');
   return response.data;
 };
 
@@ -79,7 +79,7 @@ export const clearVectorStore = async (): Promise<{ success: boolean; message: s
  * List all documents in knowledge base
  */
 export const listDocuments = async (): Promise<{ documents: DocumentInfo[]; count: number }> => {
-  const response = await api.get('/documents');
+  const response = await api.get('/api/documents');
   return response.data;
 };
 
@@ -96,11 +96,9 @@ export const uploadDocument = async (
     formData.append('description', description);
   }
 
-  const response = await api.post('/documents/upload', formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data'
-    }
-  });
+  // Don't set Content-Type header manually for FormData
+  // The browser will set it automatically with the correct boundary
+  const response = await api.post('/api/documents/upload', formData);
   return response.data;
 };
 
@@ -108,7 +106,7 @@ export const uploadDocument = async (
  * Delete a document
  */
 export const deleteDocument = async (filename: string): Promise<{ success: boolean; message: string }> => {
-  const response = await api.delete(`/documents/${filename}`);
+  const response = await api.delete(`/api/documents/${filename}`);
   return response.data;
 };
 
@@ -120,7 +118,7 @@ export const ingestDocuments = async (
   recursive: boolean = true,
   fileExtensions?: string[]
 ): Promise<{ success: boolean; documents_processed: number; total_chunks: number }> => {
-  const response = await api.post('/documents/ingest', {
+  const response = await api.post('/api/documents/ingest', {
     directory,
     recursive,
     file_extensions: fileExtensions

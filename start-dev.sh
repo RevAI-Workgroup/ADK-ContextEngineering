@@ -91,11 +91,11 @@ fi
 
 # Initialize Vector Store (if not already initialized)
 log "VECTOR STORE" "Checking ChromaDB initialization..." "$CYAN"
-if python3 scripts/init_vector_store.py > /dev/null 2>&1; then
+if (source venv/bin/activate && python3 scripts/init_vector_store.py 2>&1 | grep -v "Failed to send telemetry") > /dev/null 2>&1; then
     log "VECTOR STORE" "Vector store initialized successfully" "$CYAN"
 else
     log "WARNING" "Vector store initialization failed (non-critical)" "$YELLOW"
-    log "WARNING" "You can manually initialize later with: python3 scripts/init_vector_store.py" "$YELLOW"
+    log "WARNING" "You can manually initialize later with: source venv/bin/activate && python3 scripts/init_vector_store.py" "$YELLOW"
 fi
 
 # Start backend

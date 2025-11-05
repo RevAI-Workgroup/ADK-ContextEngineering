@@ -157,12 +157,13 @@ class ContextEngineeringModule(ABC):
 # ============================================================================
 
 
-class RAGModule(ContextEngineeringModule):
+class NaiveRAGModule(ContextEngineeringModule):
     """
-    Retrieval-Augmented Generation module (Phase 3).
+    Naive Retrieval-Augmented Generation module (Phase 3).
 
-    This module retrieves relevant documents from a vector database
-    and injects them into the context.
+    This module automatically retrieves relevant documents from a vector database
+    and injects them into the context before every LLM call, without giving the LLM
+    control over when retrieval happens.
 
     Features:
     - Vector database integration (ChromaDB)
@@ -172,11 +173,11 @@ class RAGModule(ContextEngineeringModule):
     """
 
     def __init__(self):
-        super().__init__("RAG")
+        super().__init__("NaiveRAG")
         self.chunk_size = 512
         self.chunk_overlap = 50
         self.top_k = 5
-        self.similarity_threshold = 0.7
+        self.similarity_threshold = 0.2  # Optimized for better recall with acceptable precision
         self.embedding_model = "sentence-transformers/all-MiniLM-L6-v2"
         self._last_metrics = ModuleMetrics(module_name=self.name)
 
@@ -256,6 +257,7 @@ class RAGModule(ContextEngineeringModule):
             if results:
                 retrieved_texts = []
                 sources = []
+                retrieved_documents = []  # Store detailed document info
 
                 for i, result in enumerate(results):
                     # Format retrieved chunk
@@ -270,6 +272,15 @@ class RAGModule(ContextEngineeringModule):
                     )
                     sources.append(source)
 
+                    # Store document details for frontend display
+                    retrieved_documents.append({
+                        "text": result.text,
+                        "source": source,
+                        "similarity": float(similarity),
+                        "chunk_index": chunk_idx,
+                        "metadata": result.metadata
+                    })
+
                 # Join all retrieved texts
                 context.context = "\n\n---\n\n".join(retrieved_texts)
 
@@ -280,6 +291,7 @@ class RAGModule(ContextEngineeringModule):
                 context.metadata["rag_avg_similarity"] = (
                     sum(r.similarity for r in results) / len(results)
                 )
+                context.metadata["rag_documents"] = retrieved_documents  # Add detailed docs
 
                 self.logger.info(
                     f"Retrieved {len(results)} documents "
@@ -325,7 +337,218 @@ class RAGModule(ContextEngineeringModule):
         return context
     
     def get_metrics(self) -> ModuleMetrics:
-        """Get RAG metrics from last execution."""
+        """Get Naive RAG metrics from last execution."""
+        return self._last_metrics
+
+
+class RAGToolModule(ContextEngineeringModule):
+    """
+    RAG-as-tool module (Phase 3).
+
+    This module provides the LLM with a retrieval tool that it can choose to invoke
+    when it determines that external knowledge is needed to answer a query.
+    This gives the LLM more control over the retrieval process.
+
+    The tool is registered and the LLM decides when to use it through function calling.
+
+    Features:
+    - Vector database integration (ChromaDB)
+    - LLM-controlled retrieval via tool calling
+    - Document chunking and embedding
+    - Similarity search
+    """
+
+    def __init__(self):
+        super().__init__("RAGTool")
+        self.chunk_size = 512
+        self.chunk_overlap = 50
+        self.top_k = 5
+        self.similarity_threshold = 0.2
+        self.embedding_model = "sentence-transformers/all-MiniLM-L6-v2"
+        self.tool_name = "search_knowledge_base"
+        self.tool_description = "Search the knowledge base for relevant information about a specific topic or question"
+        self._last_metrics = ModuleMetrics(module_name=self.name)
+
+        # Lazy initialization of vector store (only when needed)
+        self._vector_store = None
+
+    def configure(self, config: Dict[str, Any]) -> None:
+        """Configure RAG-as-tool parameters."""
+        self.chunk_size = config.get("chunk_size", self.chunk_size)
+        self.chunk_overlap = config.get("chunk_overlap", self.chunk_overlap)
+        self.top_k = config.get("top_k", self.top_k)
+        self.similarity_threshold = config.get("similarity_threshold", self.similarity_threshold)
+        self.embedding_model = config.get("embedding_model", self.embedding_model)
+        self.tool_name = config.get("tool_name", self.tool_name)
+        self.tool_description = config.get("tool_description", self.tool_description)
+        self.logger.info(
+            f"RAG-as-tool configured: tool_name={self.tool_name}, "
+            f"top_k={self.top_k}, threshold={self.similarity_threshold}"
+        )
+
+    def get_tool_definition(self) -> Dict[str, Any]:
+        """
+        Get the tool definition for LLM function calling.
+
+        Returns:
+            Tool definition dictionary compatible with Ollama/OpenAI function calling
+        """
+        return {
+            "type": "function",
+            "function": {
+                "name": self.tool_name,
+                "description": self.tool_description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "The search query to find relevant information in the knowledge base"
+                        },
+                        "top_k": {
+                            "type": "integer",
+                            "description": f"Number of documents to retrieve (default: {self.top_k})",
+                            "default": self.top_k
+                        }
+                    },
+                    "required": ["query"]
+                }
+            }
+        }
+
+    def execute_tool(self, query: str, top_k: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Execute the RAG tool search.
+
+        Args:
+            query: Search query
+            top_k: Number of documents to retrieve (optional, uses default if not provided)
+
+        Returns:
+            Dictionary with retrieved documents and metadata
+        """
+        start_time = time.time()
+        top_k = top_k or self.top_k
+
+        self.logger.info(f"RAG tool executing search: {query[:50]}...")
+
+        # Initialize vector store if not already initialized
+        if self._vector_store is None:
+            try:
+                from src.retrieval.vector_store import get_vector_store
+                self._vector_store = get_vector_store()
+                self.logger.info("Vector store initialized for RAG tool")
+            except Exception as e:
+                self.logger.error(f"Failed to initialize vector store: {e}", exc_info=True)
+                return {
+                    "status": "error",
+                    "error": str(e),
+                    "documents": []
+                }
+
+        # Check if vector store has documents
+        doc_count = self._vector_store.count()
+        if doc_count == 0:
+            self.logger.warning("Vector store is empty - no documents to retrieve")
+            return {
+                "status": "empty",
+                "message": "No documents in vector store",
+                "documents": []
+            }
+
+        # Perform retrieval
+        try:
+            results = self._vector_store.search(
+                query=query,
+                top_k=top_k,
+                similarity_threshold=self.similarity_threshold
+            )
+
+            if results:
+                retrieved_documents = []
+                sources = []
+
+                for i, result in enumerate(results):
+                    source = result.metadata.get("source", "unknown")
+                    chunk_idx = result.metadata.get("chunk_index", "")
+                    similarity = result.similarity
+
+                    sources.append(source)
+                    retrieved_documents.append({
+                        "text": result.text,
+                        "source": source,
+                        "similarity": float(similarity),
+                        "chunk_index": chunk_idx,
+                        "metadata": result.metadata
+                    })
+
+                execution_time = (time.time() - start_time) * 1000
+                self.logger.info(
+                    f"RAG tool retrieved {len(results)} documents in {execution_time:.2f}ms"
+                )
+
+                return {
+                    "status": "success",
+                    "documents": retrieved_documents,
+                    "retrieved_count": len(results),
+                    "sources": list(set(sources)),
+                    "avg_similarity": sum(r.similarity for r in results) / len(results),
+                    "execution_time_ms": execution_time
+                }
+            else:
+                return {
+                    "status": "no_results",
+                    "message": f"No documents found above similarity threshold {self.similarity_threshold}",
+                    "documents": []
+                }
+
+        except Exception as e:
+            self.logger.error(f"RAG tool search failed: {e}", exc_info=True)
+            return {
+                "status": "error",
+                "error": str(e),
+                "documents": []
+            }
+
+    def process(self, context: PipelineContext) -> PipelineContext:
+        """
+        Process context through RAG-as-tool.
+
+        This module doesn't automatically inject documents. Instead, it registers
+        the tool definition in the context metadata for the LLM to use.
+
+        Args:
+            context: Pipeline context
+
+        Returns:
+            Updated context with tool definition
+        """
+        start_time = time.time()
+
+        self.logger.info("RAG-as-tool registering tool definition")
+
+        # Register the tool definition in context metadata
+        if "tools" not in context.metadata:
+            context.metadata["tools"] = []
+
+        context.metadata["tools"].append(self.get_tool_definition())
+        context.metadata["rag_tool_status"] = "registered"
+        context.metadata["rag_tool_name"] = self.tool_name
+
+        execution_time = (time.time() - start_time) * 1000
+        self._last_metrics = ModuleMetrics(
+            module_name=self.name,
+            execution_time_ms=execution_time,
+            technique_specific={
+                "status": "registered",
+                "tool_name": self.tool_name
+            }
+        )
+
+        return context
+
+    def get_metrics(self) -> ModuleMetrics:
+        """Get RAG-as-tool metrics from last execution."""
         return self._last_metrics
 
 
@@ -665,7 +888,8 @@ class ContextPipeline:
         
         # Initialize all available modules
         self.modules: Dict[str, ContextEngineeringModule] = {
-            "rag": RAGModule(),
+            "naive_rag": NaiveRAGModule(),
+            "rag_tool": RAGToolModule(),
             "compression": CompressionModule(),
             "reranking": RerankingModule(),
             "caching": CachingModule(),
@@ -680,12 +904,19 @@ class ContextPipeline:
     
     def _configure_modules(self) -> None:
         """Configure all modules based on the current config."""
-        # RAG
-        if self.config.rag_enabled:
-            self.modules["rag"].enable()
-            self.modules["rag"].configure(self.config.rag.__dict__)
+        # Naive RAG
+        if self.config.naive_rag_enabled:
+            self.modules["naive_rag"].enable()
+            self.modules["naive_rag"].configure(self.config.naive_rag.__dict__)
         else:
-            self.modules["rag"].disable()
+            self.modules["naive_rag"].disable()
+
+        # RAG-as-tool
+        if self.config.rag_tool_enabled:
+            self.modules["rag_tool"].enable()
+            self.modules["rag_tool"].configure(self.config.rag_tool.__dict__)
+        else:
+            self.modules["rag_tool"].disable()
         
         # Compression
         if self.config.compression_enabled:
@@ -768,7 +999,8 @@ class ContextPipeline:
         )
         
         # Execute enabled modules in order
-        module_order = ["memory", "caching", "rag", "hybrid_search", "reranking", "compression"]
+        # Note: rag_tool is registered but doesn't process automatically - it waits for LLM to call it
+        module_order = ["memory", "caching", "naive_rag", "rag_tool", "hybrid_search", "reranking", "compression"]
         
         for module_name in module_order:
             module = self.modules.get(module_name)

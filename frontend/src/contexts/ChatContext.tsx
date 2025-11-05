@@ -31,7 +31,27 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     try {
       const savedConfig = localStorage.getItem(CONFIG_STORAGE_KEY)
       if (savedConfig) {
-        return JSON.parse(savedConfig)
+        const parsed = JSON.parse(savedConfig)
+
+        // Migration: Handle old 'rag' structure
+        if (parsed.rag && !parsed.naive_rag) {
+          console.log('Migrating old RAG config to naive_rag')
+          const defaultConfig = createDefaultConfig()
+          return {
+            ...parsed,
+            naive_rag: parsed.rag,
+            rag_tool: defaultConfig.rag_tool,
+          }
+        }
+
+        // Ensure all required fields exist
+        const defaultConfig = createDefaultConfig()
+        return {
+          ...defaultConfig,
+          ...parsed,
+          naive_rag: parsed.naive_rag || defaultConfig.naive_rag,
+          rag_tool: parsed.rag_tool || defaultConfig.rag_tool,
+        }
       }
     } catch (error) {
       console.error('Failed to load config from localStorage:', error)

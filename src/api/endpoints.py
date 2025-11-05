@@ -77,6 +77,8 @@ class ChatResponse(BaseModel):
     metrics: Optional[Dict[str, Any]] = Field(None, description="Response metrics")
     timestamp: str = Field(..., description="Response timestamp")
     model: Optional[str] = Field(None, description="Model used for this response")
+    pipeline_metadata: Optional[Dict[str, Any]] = Field(None, description="RAG and pipeline metadata")
+    pipeline_metrics: Optional[Dict[str, Any]] = Field(None, description="Pipeline execution metrics")
 
 
 class ToolInfo(BaseModel):
@@ -159,7 +161,10 @@ async def chat(
         
         # Collect metrics
         metrics = metrics_collector.collect_response_metrics(result)
-        
+
+        # Extract pipeline metrics from result if available
+        pipeline_metrics = result.get("metrics", {}).get("pipeline_metrics") if result.get("metrics") else None
+
         return ChatResponse(
             response=result.get("response", ""),
             thinking_steps=result.get("thinking_steps"),
@@ -167,6 +172,8 @@ async def chat(
             metrics=metrics,
             timestamp=datetime.now(timezone.utc).isoformat(),
             model=result.get("model", message.model),
+            pipeline_metadata=result.get("pipeline_metadata"),
+            pipeline_metrics=pipeline_metrics,
         )
         
     except Exception as e:
@@ -1337,5 +1344,56 @@ async def search_vector_store(
 
     except Exception as e:
         logger.error(f"Error searching vector store: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@documents_router.post("/rag-tool/execute")
+async def execute_rag_tool(
+    query: str,
+    top_k: int = 5,
+    config: Optional[ContextEngineeringConfig] = None
+):
+    """
+    Execute the RAG tool to search the knowledge base.
+
+    This endpoint is called by the LLM when it decides to use the RAG tool.
+
+    Args:
+        query: Search query
+        top_k: Number of documents to retrieve
+        config: Optional configuration (uses default if not provided)
+    """
+    try:
+        from src.core.modular_pipeline import ContextPipeline, RAGToolModule
+
+        # Get or create configuration
+        if config is None:
+            config = ContextEngineeringConfig()
+            # Enable RAG tool by default for this endpoint
+            config.rag_tool.enabled = True
+
+        # Create pipeline
+        pipeline = ContextPipeline(config)
+
+        # Get the RAG tool module
+        rag_tool_module = pipeline.get_module("rag_tool")
+
+        if not isinstance(rag_tool_module, RAGToolModule):
+            raise HTTPException(
+                status_code=400,
+                detail="RAG tool module is not properly configured"
+            )
+
+        # Execute the tool
+        result = rag_tool_module.execute_tool(query=query, top_k=top_k)
+
+        return {
+            **result,
+            "query": query,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Error executing RAG tool: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e)) from e
 

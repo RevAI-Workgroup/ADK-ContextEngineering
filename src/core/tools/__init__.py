@@ -9,10 +9,12 @@ that ADK uses to understand the tool's purpose and parameters.
 from .calculator import calculate
 from .text_tools import analyze_text, count_words
 from .time_tools import get_current_time
+from .rag_search import search_knowledge_base
 
 __all__ = [
     'calculate',
     'analyze_text',
     'count_words',
     'get_current_time',
+    'search_knowledge_base',
 ]

@@ -23,6 +23,8 @@ from google.genai import types
 from src.core.config import get_config
 from src.core.context_config import ContextEngineeringConfig
 from src.core.modular_pipeline import ContextPipeline
+from src.core.tools import search_knowledge_base
+import hashlib
 
 logger = logging.getLogger(__name__)
 
@@ -65,71 +67,126 @@ class ADKAgentWrapper:
         
         logger.info("ADK Agent Wrapper initialized with dynamic model support")
     
-    def _get_or_create_runner(self, model: Optional[str] = None) -> Runner:
+    def _get_config_hash(self, config: Optional[ContextEngineeringConfig]) -> str:
         """
-        Get or create a runner for the specified model.
-        
+        Generate a hash of the config to use as part of cache key.
+
         Args:
-            model: Model name (e.g., "qwen3:4b", "llama2:7b"). 
-                   If None, uses default model.
-        
+            config: Context engineering configuration
+
         Returns:
-            Runner instance configured for the specified model
+            Hash string representing the config state
         """
-        # Use default if no model specified
-        if not model:
-            return self._runner_cache["default"]
-        
+        if not config:
+            return "no_config"
+
+        # Create a simple hash based on enabled techniques
+        techniques = sorted(config.get_enabled_techniques())
+        config_str = ",".join(techniques)
+        return hashlib.md5(config_str.encode()).hexdigest()[:8]
+
+    def _build_tools_list(self, config: Optional[ContextEngineeringConfig]) -> List:
+        """
+        Build list of tools based on configuration.
+
+        Args:
+            config: Context engineering configuration
+
+        Returns:
+            List of tool functions to provide to the agent
+        """
+        # Start with base tools
+        tools = list(TOOLS)
+
+        # Add RAG-as-tool if enabled
+        if config and config.rag_tool_enabled:
+            logger.info("Adding search_knowledge_base tool to agent")
+            tools.append(search_knowledge_base)
+
+        return tools
+
+    def _get_or_create_runner(
+        self,
+        model: Optional[str] = None,
+        config: Optional[ContextEngineeringConfig] = None
+    ) -> Runner:
+        """
+        Get or create a runner for the specified model and configuration.
+
+        Args:
+            model: Model name (e.g., "qwen3:4b", "llama2:7b").
+                   If None, uses default model.
+            config: Optional configuration that affects tool availability
+
+        Returns:
+            Runner instance configured for the specified model and config
+        """
+        # Build cache key including config
+        config_hash = self._get_config_hash(config)
+        cache_key = f"{model or 'default'}_{config_hash}"
+
         # Check cache
-        if model in self._runner_cache:
-            logger.info(f"Using cached runner for model: {model}")
-            return self._runner_cache[model]
-        
-        # Create new agent with specified model
-        logger.info(f"Creating new agent for model: {model}")
-        
+        if cache_key in self._runner_cache:
+            logger.info(f"Using cached runner for: {cache_key}")
+            return self._runner_cache[cache_key]
+
+        # Create new agent with specified model and config
+        logger.info(f"Creating new agent for model: {model}, config_hash: {config_hash}")
+
         # Get model config from config file or use defaults
         temperature = 0.7
         max_tokens = 4096
-        
+
         if self.config:
             temperature = self.config.get("models.ollama.primary_model.temperature", 0.7)
             max_tokens = self.config.get("models.ollama.primary_model.max_tokens", 4096)
-        
+
+        # Build tools list based on configuration
+        tools = self._build_tools_list(config)
+        logger.info(f"Agent will have {len(tools)} tools: {[t.__name__ for t in tools]}")
+
         # Create new agent with the specified model
         # Sanitize model name for agent name (only alphanumeric and underscores)
-        # Convert non-alphanumeric/underscore chars to underscore, collapse consecutive underscores, strip edges
-        safe_model_name = re.sub(r'[^A-Za-z0-9_]', '_', model)
+        safe_model_name = re.sub(r'[^A-Za-z0-9_]', '_', model or 'default')
         safe_model_name = re.sub(r'_+', '_', safe_model_name)
         safe_model_name = safe_model_name.strip('_')
+
+        agent_description = (
+            "An intelligent AI agent for answering questions and performing tasks "
+            "using available tools. Capable of mathematical calculations, text analysis, "
+            "time zone queries"
+        )
+
+        # Add RAG capability to description if enabled
+        if config and config.rag_tool_enabled:
+            agent_description += ", and searching the knowledge base for information"
+
+        agent_description += "."
+
         new_agent = Agent(
-            name=f"context_engineering_agent_{safe_model_name}",
+            name=f"context_engineering_agent_{safe_model_name}_{config_hash}",
             model=LiteLlm(
-                model=f"ollama_chat/{model}",
+                model=f"ollama_chat/{model}" if model else "ollama_chat/qwen3:4b",
                 temperature=temperature,
                 max_tokens=max_tokens
             ),
-            description=(
-                "An intelligent AI agent for answering questions and performing tasks "
-                "using available tools. Capable of mathematical calculations, text analysis, "
-                "and time zone queries."
-            ),
+            description=agent_description,
             instruction=INSTRUCTION,
-            tools=TOOLS
+            tools=tools
         )
-        
+
         # Create runner for the new agent
         new_runner = Runner(
             agent=new_agent,
             app_name='agents',
             session_service=self.session_service
         )
-        
+
         # Cache the agent and runner
-        self._agent_cache[model] = new_agent
-        self._runner_cache[model] = new_runner
-        
-        logger.info(f"Successfully created and cached agent for model: {model}")
+        self._agent_cache[cache_key] = new_agent
+        self._runner_cache[cache_key] = new_runner
+
+        logger.info(f"Successfully created and cached agent: {cache_key}")
         return new_runner
     
     async def process_message(
@@ -216,22 +273,51 @@ class ADKAgentWrapper:
             response_text = ""
             tool_calls = []
             thinking_steps = []
-            
+
             for idx, event in enumerate(events_list):
                 event_type = type(event).__name__
-                logger.debug(f"Processing event {idx}: {event_type}")
-                
+                logger.info(f"[EVENT {idx}] Type: {event_type}")
+
+                # Log all event attributes for debugging
+                event_attrs = {attr: getattr(event, attr) for attr in dir(event) if not attr.startswith('_')}
+                logger.debug(f"[EVENT {idx}] Attributes: {list(event_attrs.keys())}")
+
                 # Extract text from content
                 if hasattr(event, 'content') and event.content:
                     if hasattr(event.content, 'parts'):
-                        for part in event.content.parts:
+                        for part_idx, part in enumerate(event.content.parts):
+                            part_type = type(part).__name__
+                            logger.info(f"[EVENT {idx}] Part {part_idx}: {part_type}")
+
+                            # Extract text
                             if hasattr(part, 'text') and part.text:
                                 text = part.text
-                                logger.info(f"Extracted text from event {idx}: {text[:100]}")
+                                logger.info(f"[EVENT {idx}] Text: {text[:100]}")
                                 response_text = text
-                
-                # Look for tool call information
-                if 'tool' in event_type.lower():
+
+                            # Check for function call (tool usage)
+                            if hasattr(part, 'function_call'):
+                                func_call = part.function_call
+                                logger.info(f"[EVENT {idx}] Function call detected: {func_call}")
+                                if func_call:
+                                    tool_calls.append({
+                                        "name": func_call.name if hasattr(func_call, 'name') else "unknown_tool",
+                                        "description": f"Called tool: {func_call.name if hasattr(func_call, 'name') else 'unknown'}",
+                                        "parameters": dict(func_call.args) if hasattr(func_call, 'args') else {},
+                                        "timestamp": datetime.utcnow().isoformat()
+                                    })
+
+                            # Check for function response (tool result)
+                            if hasattr(part, 'function_response'):
+                                func_response = part.function_response
+                                logger.info(f"[EVENT {idx}] Function response detected: {func_response}")
+                                if func_response and tool_calls:
+                                    # Add result to the last tool call
+                                    tool_calls[-1]["result"] = func_response.response if hasattr(func_response, 'response') else str(func_response)
+
+                # Legacy: Look for tool in event type name
+                if 'tool' in event_type.lower() and not tool_calls:
+                    logger.warning(f"[EVENT {idx}] Tool-like event but no function_call found: {event_type}")
                     tool_calls.append({
                         "name": event_type,
                         "description": f"Tool invocation: {event_type}",

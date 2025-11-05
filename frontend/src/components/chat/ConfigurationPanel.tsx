@@ -183,12 +183,19 @@ export function ConfigurationPanel({ config, onConfigChange, className }: Config
             {/* Technique Toggles */}
             <div className="space-y-4">
               <Label className="text-base font-semibold">Enabled Techniques</Label>
-              
+
               <TechniqueSwitch
-                label={TECHNIQUE_NAMES.rag}
-                description={TECHNIQUE_DESCRIPTIONS.rag}
-                checked={config.rag.enabled}
-                onCheckedChange={(checked) => handleTechniqueToggle('rag', checked)}
+                label={TECHNIQUE_NAMES.naive_rag}
+                description={TECHNIQUE_DESCRIPTIONS.naive_rag}
+                checked={config.naive_rag.enabled}
+                onCheckedChange={(checked) => handleTechniqueToggle('naive_rag', checked)}
+              />
+
+              <TechniqueSwitch
+                label={TECHNIQUE_NAMES.rag_tool}
+                description={TECHNIQUE_DESCRIPTIONS.rag_tool}
+                checked={config.rag_tool.enabled}
+                onCheckedChange={(checked) => handleTechniqueToggle('rag_tool', checked)}
               />
 
               <TechniqueSwitch
@@ -203,7 +210,7 @@ export function ConfigurationPanel({ config, onConfigChange, className }: Config
                 description={TECHNIQUE_DESCRIPTIONS.reranking}
                 checked={config.reranking.enabled}
                 onCheckedChange={(checked) => handleTechniqueToggle('reranking', checked)}
-                disabled={!config.rag.enabled}
+                disabled={!config.naive_rag.enabled}
               />
 
               <TechniqueSwitch
@@ -218,7 +225,7 @@ export function ConfigurationPanel({ config, onConfigChange, className }: Config
                 description={TECHNIQUE_DESCRIPTIONS.hybrid_search}
                 checked={config.hybrid_search.enabled}
                 onCheckedChange={(checked) => handleTechniqueToggle('hybrid_search', checked)}
-                disabled={!config.rag.enabled}
+                disabled={!config.naive_rag.enabled}
               />
 
               <TechniqueSwitch
@@ -233,18 +240,18 @@ export function ConfigurationPanel({ config, onConfigChange, className }: Config
           {/* Advanced Tab */}
           <TabsContent value="advanced" className="space-y-4">
             <Accordion type="multiple" className="w-full">
-              {/* RAG Settings */}
-              {config.rag.enabled && (
-                <AccordionItem value="rag">
-                  <AccordionTrigger>RAG Configuration</AccordionTrigger>
+              {/* Naive RAG Settings */}
+              {config.naive_rag.enabled && (
+                <AccordionItem value="naive_rag">
+                  <AccordionTrigger>Naive RAG Configuration</AccordionTrigger>
                   <AccordionContent className="space-y-4">
                     <div className="space-y-2">
-                      <Label>Chunk Size: {config.rag.chunk_size}</Label>
+                      <Label>Chunk Size: {config.naive_rag.chunk_size}</Label>
                       <Slider
-                        value={[config.rag.chunk_size]}
+                        value={[config.naive_rag.chunk_size]}
                         onValueChange={([value]) => {
                           const newConfig = { ...config }
-                          newConfig.rag.chunk_size = value
+                          newConfig.naive_rag.chunk_size = value
                           onConfigChange(newConfig)
                         }}
                         min={128}
@@ -254,12 +261,12 @@ export function ConfigurationPanel({ config, onConfigChange, className }: Config
                     </div>
 
                     <div className="space-y-2">
-                      <Label>Chunk Overlap: {config.rag.chunk_overlap}</Label>
+                      <Label>Chunk Overlap: {config.naive_rag.chunk_overlap}</Label>
                       <Slider
-                        value={[config.rag.chunk_overlap]}
+                        value={[config.naive_rag.chunk_overlap]}
                         onValueChange={([value]) => {
                           const newConfig = { ...config }
-                          newConfig.rag.chunk_overlap = value
+                          newConfig.naive_rag.chunk_overlap = value
                           onConfigChange(newConfig)
                         }}
                         min={0}
@@ -269,12 +276,12 @@ export function ConfigurationPanel({ config, onConfigChange, className }: Config
                     </div>
 
                     <div className="space-y-2">
-                      <Label>Top K Documents: {config.rag.top_k}</Label>
+                      <Label>Top K Documents: {config.naive_rag.top_k}</Label>
                       <Slider
-                        value={[config.rag.top_k]}
+                        value={[config.naive_rag.top_k]}
                         onValueChange={([value]) => {
                           const newConfig = { ...config }
-                          newConfig.rag.top_k = value
+                          newConfig.naive_rag.top_k = value
                           onConfigChange(newConfig)
                         }}
                         min={1}
@@ -284,12 +291,106 @@ export function ConfigurationPanel({ config, onConfigChange, className }: Config
                     </div>
 
                     <div className="space-y-2">
-                      <Label>Similarity Threshold: {config.rag.similarity_threshold.toFixed(2)}</Label>
+                      <Label>Similarity Threshold: {config.naive_rag.similarity_threshold.toFixed(2)}</Label>
                       <Slider
-                        value={[config.rag.similarity_threshold]}
+                        value={[config.naive_rag.similarity_threshold]}
                         onValueChange={([value]) => {
                           const newConfig = { ...config }
-                          newConfig.rag.similarity_threshold = value
+                          newConfig.naive_rag.similarity_threshold = value
+                          onConfigChange(newConfig)
+                        }}
+                        min={0}
+                        max={1}
+                        step={0.05}
+                      />
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+              )}
+
+              {/* RAG-as-tool Settings */}
+              {config.rag_tool.enabled && (
+                <AccordionItem value="rag_tool">
+                  <AccordionTrigger>RAG-as-tool Configuration</AccordionTrigger>
+                  <AccordionContent className="space-y-4">
+                    <div className="space-y-2">
+                      <Label>Tool Name</Label>
+                      <Input
+                        value={config.rag_tool.tool_name}
+                        onChange={(e) => {
+                          const newConfig = { ...config }
+                          newConfig.rag_tool.tool_name = e.target.value
+                          onConfigChange(newConfig)
+                        }}
+                        placeholder="search_knowledge_base"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Tool Description</Label>
+                      <Input
+                        value={config.rag_tool.tool_description}
+                        onChange={(e) => {
+                          const newConfig = { ...config }
+                          newConfig.rag_tool.tool_description = e.target.value
+                          onConfigChange(newConfig)
+                        }}
+                        placeholder="Search the knowledge base for relevant information"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Chunk Size: {config.rag_tool.chunk_size}</Label>
+                      <Slider
+                        value={[config.rag_tool.chunk_size]}
+                        onValueChange={([value]) => {
+                          const newConfig = { ...config }
+                          newConfig.rag_tool.chunk_size = value
+                          onConfigChange(newConfig)
+                        }}
+                        min={128}
+                        max={2048}
+                        step={128}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Chunk Overlap: {config.rag_tool.chunk_overlap}</Label>
+                      <Slider
+                        value={[config.rag_tool.chunk_overlap]}
+                        onValueChange={([value]) => {
+                          const newConfig = { ...config }
+                          newConfig.rag_tool.chunk_overlap = value
+                          onConfigChange(newConfig)
+                        }}
+                        min={0}
+                        max={512}
+                        step={10}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Top K Documents: {config.rag_tool.top_k}</Label>
+                      <Slider
+                        value={[config.rag_tool.top_k]}
+                        onValueChange={([value]) => {
+                          const newConfig = { ...config }
+                          newConfig.rag_tool.top_k = value
+                          onConfigChange(newConfig)
+                        }}
+                        min={1}
+                        max={20}
+                        step={1}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Similarity Threshold: {config.rag_tool.similarity_threshold.toFixed(2)}</Label>
+                      <Slider
+                        value={[config.rag_tool.similarity_threshold]}
+                        onValueChange={([value]) => {
+                          const newConfig = { ...config }
+                          newConfig.rag_tool.similarity_threshold = value
                           onConfigChange(newConfig)
                         }}
                         min={0}

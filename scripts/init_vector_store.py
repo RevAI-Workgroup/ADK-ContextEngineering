@@ -8,9 +8,11 @@ the test documents from data/knowledge_base/
 
 import sys
 import os
+from pathlib import Path
 
-# Add project root to path
-sys.path.insert(0, '/home/user/ADK-ContextEngineering')
+# Add project root to path (dynamically determine it)
+project_root = Path(__file__).parent.parent.absolute()
+sys.path.insert(0, str(project_root))
 
 def initialize_vector_store():
     """Initialize vector store and ingest test documents."""

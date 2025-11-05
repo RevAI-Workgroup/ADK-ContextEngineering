@@ -21,14 +21,38 @@ class ConfigPreset(str, Enum):
 
 
 @dataclass
-class RAGConfig:
-    """Configuration for RAG (Retrieval-Augmented Generation) module."""
+class NaiveRAGConfig:
+    """
+    Configuration for Naive RAG (Retrieval-Augmented Generation) module.
+
+    Naive RAG automatically retrieves and injects relevant documents into the context
+    before every LLM call, without giving the LLM control over when retrieval happens.
+    """
     enabled: bool = False
     chunk_size: int = 512
     chunk_overlap: int = 50
     top_k: int = 5
-    similarity_threshold: float = 0.7
+    similarity_threshold: float = 0.2  # Optimized for better recall with acceptable precision
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+
+
+@dataclass
+class RAGToolConfig:
+    """
+    Configuration for RAG-as-tool module.
+
+    RAG-as-tool provides the LLM with a retrieval tool that it can choose to invoke
+    when it determines that external knowledge is needed to answer a query.
+    This approach gives the LLM more control over the retrieval process.
+    """
+    enabled: bool = False
+    chunk_size: int = 512
+    chunk_overlap: int = 50
+    top_k: int = 5
+    similarity_threshold: float = 0.2
+    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    tool_name: str = "search_knowledge_base"
+    tool_description: str = "Search the knowledge base for relevant information about a specific topic or question"
 
 
 @dataclass
@@ -81,12 +105,13 @@ class MemoryConfig:
 class ContextEngineeringConfig:
     """
     Main configuration dataclass for context engineering techniques.
-    
+
     This class manages all toggleable techniques and their detailed parameters.
     Each technique can be independently enabled/disabled and configured.
-    
+
     Attributes:
-        rag: RAG module configuration
+        naive_rag: Naive RAG module configuration (automatic retrieval)
+        rag_tool: RAG-as-tool module configuration (LLM-controlled retrieval)
         compression: Compression module configuration
         reranking: Reranking module configuration
         caching: Caching module configuration
@@ -96,8 +121,9 @@ class ContextEngineeringConfig:
         max_context_tokens: Maximum tokens allowed in context window
         temperature: Sampling temperature for LLM
     """
-    
-    rag: RAGConfig = field(default_factory=RAGConfig)
+
+    naive_rag: NaiveRAGConfig = field(default_factory=NaiveRAGConfig)
+    rag_tool: RAGToolConfig = field(default_factory=RAGToolConfig)
     compression: CompressionConfig = field(default_factory=CompressionConfig)
     reranking: RerankingConfig = field(default_factory=RerankingConfig)
     caching: CachingConfig = field(default_factory=CachingConfig)
@@ -110,9 +136,19 @@ class ContextEngineeringConfig:
     temperature: float = 0.7
     
     @property
+    def naive_rag_enabled(self) -> bool:
+        """Check if Naive RAG is enabled."""
+        return self.naive_rag.enabled
+
+    @property
+    def rag_tool_enabled(self) -> bool:
+        """Check if RAG-as-tool is enabled."""
+        return self.rag_tool.enabled
+
+    @property
     def rag_enabled(self) -> bool:
-        """Check if RAG is enabled."""
-        return self.rag.enabled
+        """Check if any RAG variant is enabled (backward compatibility)."""
+        return self.naive_rag.enabled or self.rag_tool.enabled
     
     @property
     def compression_enabled(self) -> bool:
@@ -169,15 +205,18 @@ class ContextEngineeringConfig:
             ContextEngineeringConfig instance
         """
         # Extract nested configurations
-        rag_data = data.get('rag', {})
+        # Support both old 'rag' and new 'naive_rag' for backward compatibility
+        naive_rag_data = data.get('naive_rag', data.get('rag', {}))
+        rag_tool_data = data.get('rag_tool', {})
         compression_data = data.get('compression', {})
         reranking_data = data.get('reranking', {})
         caching_data = data.get('caching', {})
         hybrid_search_data = data.get('hybrid_search', {})
         memory_data = data.get('memory', {})
-        
+
         return cls(
-            rag=RAGConfig(**rag_data),
+            naive_rag=NaiveRAGConfig(**naive_rag_data),
+            rag_tool=RAGToolConfig(**rag_tool_data),
             compression=CompressionConfig(**compression_data),
             reranking=RerankingConfig(**reranking_data),
             caching=CachingConfig(**caching_data),
@@ -218,25 +257,26 @@ class ContextEngineeringConfig:
             return cls()
         
         elif preset == ConfigPreset.BASIC_RAG:
-            # Only RAG enabled with basic settings
+            # Only Naive RAG enabled with basic settings
             config = cls()
-            config.rag.enabled = True
+            config.naive_rag.enabled = True
             return config
-        
+
         elif preset == ConfigPreset.ADVANCED_RAG:
-            # RAG + reranking + hybrid search
+            # Naive RAG + reranking + hybrid search
             config = cls()
-            config.rag.enabled = True
-            config.rag.top_k = 10  # Retrieve more for reranking
+            config.naive_rag.enabled = True
+            config.naive_rag.top_k = 10  # Retrieve more for reranking
             config.reranking.enabled = True
             config.hybrid_search.enabled = True
             return config
-        
+
         elif preset == ConfigPreset.FULL_STACK:
             # All techniques enabled with optimal settings
             config = cls()
-            config.rag.enabled = True
-            config.rag.top_k = 10
+            config.naive_rag.enabled = True
+            config.naive_rag.top_k = 10
+            config.rag_tool.enabled = True  # Also enable RAG-as-tool
             config.compression.enabled = True
             config.reranking.enabled = True
             config.caching.enabled = True
@@ -255,19 +295,34 @@ class ContextEngineeringConfig:
             List of validation error messages (empty if valid)
         """
         errors = []
-        
-        # Validate RAG settings
-        if self.rag.enabled:
-            if self.rag.chunk_size <= 0:
-                errors.append("RAG chunk_size must be positive")
-            if self.rag.chunk_overlap < 0:
-                errors.append("RAG chunk_overlap must be non-negative")
-            if self.rag.chunk_overlap >= self.rag.chunk_size:
-                errors.append("RAG chunk_overlap must be less than chunk_size")
-            if self.rag.top_k <= 0:
-                errors.append("RAG top_k must be positive")
-            if not (0.0 <= self.rag.similarity_threshold <= 1.0):
-                errors.append("RAG similarity_threshold must be between 0 and 1")
+
+        # Validate Naive RAG settings
+        if self.naive_rag.enabled:
+            if self.naive_rag.chunk_size <= 0:
+                errors.append("Naive RAG chunk_size must be positive")
+            if self.naive_rag.chunk_overlap < 0:
+                errors.append("Naive RAG chunk_overlap must be non-negative")
+            if self.naive_rag.chunk_overlap >= self.naive_rag.chunk_size:
+                errors.append("Naive RAG chunk_overlap must be less than chunk_size")
+            if self.naive_rag.top_k <= 0:
+                errors.append("Naive RAG top_k must be positive")
+            if not (0.0 <= self.naive_rag.similarity_threshold <= 1.0):
+                errors.append("Naive RAG similarity_threshold must be between 0 and 1")
+
+        # Validate RAG-as-tool settings
+        if self.rag_tool.enabled:
+            if self.rag_tool.chunk_size <= 0:
+                errors.append("RAG-as-tool chunk_size must be positive")
+            if self.rag_tool.chunk_overlap < 0:
+                errors.append("RAG-as-tool chunk_overlap must be non-negative")
+            if self.rag_tool.chunk_overlap >= self.rag_tool.chunk_size:
+                errors.append("RAG-as-tool chunk_overlap must be less than chunk_size")
+            if self.rag_tool.top_k <= 0:
+                errors.append("RAG-as-tool top_k must be positive")
+            if not (0.0 <= self.rag_tool.similarity_threshold <= 1.0):
+                errors.append("RAG-as-tool similarity_threshold must be between 0 and 1")
+            if not self.rag_tool.tool_name:
+                errors.append("RAG-as-tool tool_name must be specified")
         
         # Validate compression settings
         if self.compression.enabled:
@@ -278,12 +333,12 @@ class ContextEngineeringConfig:
         
         # Validate reranking settings
         if self.reranking.enabled:
-            if not self.rag.enabled:
-                errors.append("Reranking requires RAG to be enabled")
+            if not self.naive_rag.enabled:
+                errors.append("Reranking requires Naive RAG to be enabled")
             if self.reranking.top_n_after_rerank <= 0:
                 errors.append("Reranking top_n_after_rerank must be positive")
-            if self.reranking.top_n_after_rerank > self.rag.top_k:
-                errors.append("Reranking top_n cannot exceed RAG top_k")
+            if self.reranking.top_n_after_rerank > self.naive_rag.top_k:
+                errors.append("Reranking top_n cannot exceed Naive RAG top_k")
             if not (0.0 <= self.reranking.rerank_threshold <= 1.0):
                 errors.append("Reranking threshold must be between 0 and 1")
         
@@ -298,8 +353,8 @@ class ContextEngineeringConfig:
         
         # Validate hybrid search settings
         if self.hybrid_search.enabled:
-            if not self.rag.enabled:
-                errors.append("Hybrid search requires RAG to be enabled")
+            if not self.naive_rag.enabled:
+                errors.append("Hybrid search requires Naive RAG to be enabled")
             if not (0.0 <= self.hybrid_search.bm25_weight <= 1.0):
                 errors.append("Hybrid search bm25_weight must be between 0 and 1")
             if not (0.0 <= self.hybrid_search.vector_weight <= 1.0):
@@ -345,8 +400,10 @@ class ContextEngineeringConfig:
             List of enabled technique names
         """
         techniques = []
-        if self.rag_enabled:
-            techniques.append("rag")
+        if self.naive_rag_enabled:
+            techniques.append("naive_rag")
+        if self.rag_tool_enabled:
+            techniques.append("rag_tool")
         if self.compression_enabled:
             techniques.append("compression")
         if self.reranking_enabled:

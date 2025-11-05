@@ -19,6 +19,8 @@ export interface AgentResponse {
   metrics?: ResponseMetrics
   timestamp: string
   model?: string
+  pipeline_metadata?: any
+  pipeline_metrics?: any
 }
 
 export interface ResponseMetrics {
@@ -26,5 +28,7 @@ export interface ResponseMetrics {
   token_count?: number
   timestamp: string
   session_id?: string
+  pipeline_metrics?: any
+  enabled_techniques?: string[]
 }
 
