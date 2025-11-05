@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Card } from '../ui/card'
 import { Alert, AlertDescription } from '../ui/alert'
 import { Button } from '../ui/button'
@@ -10,6 +10,7 @@ import { ToolCall } from '../../types/agent.types'
 import { useWebSocket } from '../../hooks/useWebSocket'
 import { useAgent } from '../../hooks/useAgent'
 import { useChatContext } from '../../contexts/ChatContext'
+import { uploadDocument } from '../../services/vectorStoreService'
 
 interface ChatInterfaceProps {
   useRealtime?: boolean
@@ -17,6 +18,7 @@ interface ChatInterfaceProps {
 
 export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
   const { messages, setMessages, isProcessing, setIsProcessing, errorMessage, setErrorMessage, selectedModel, config } = useChatContext()
+  const [uploadingFile, setUploadingFile] = useState(false)
 
   // WebSocket for real-time streaming
   const { isConnected, events, connect, sendMessage: sendWsMessage, clearEvents } = useWebSocket()
@@ -242,6 +244,31 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
     }
   }
 
+  const handleFileUpload = async (file: File) => {
+    if (!['.txt', '.md'].some(ext => file.name.endsWith(ext))) {
+      setErrorMessage('Only .txt and .md files are supported')
+      return
+    }
+
+    setUploadingFile(true)
+    try {
+      await uploadDocument(file)
+      // Add a system message to chat
+      const systemMessage: Message = {
+        id: Date.now().toString(),
+        role: 'assistant',
+        content: `✅ Document "${file.name}" uploaded successfully and added to vector store. You can now ask questions about its content!`,
+        timestamp: new Date().toISOString()
+      }
+      setMessages(prev => [...prev, systemMessage])
+    } catch (error) {
+      console.error('Upload failed:', error)
+      setErrorMessage(`Failed to upload document: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    } finally {
+      setUploadingFile(false)
+    }
+  }
+
   return (
     <div className="flex flex-col h-[500px] w-full max-w-4xl gap-4">
       {/* Error Banner */}
@@ -284,7 +311,12 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
       </Card>
 
       {/* Custom Input */}
-      <ChatInput onSend={handleSendMessage} disabled={isProcessing} />
+      <ChatInput
+        onSend={handleSendMessage}
+        onFileUpload={handleFileUpload}
+        disabled={isProcessing}
+        uploadingFile={uploadingFile}
+      />
     </div>
   )
 }

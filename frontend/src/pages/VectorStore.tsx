@@ -283,7 +283,7 @@ const VectorStore: React.FC = () => {
       {/* Document Management */}
       <Card className="p-6">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-semibold">Documents ({documents.length})</h2>
+          <h2 className="text-xl font-semibold">Documents ({documents?.length || 0})</h2>
           <div className="flex gap-2">
             <label htmlFor="file-upload">
               <Button disabled={uploadingFile} asChild>
@@ -307,7 +307,7 @@ const VectorStore: React.FC = () => {
           </div>
         </div>
 
-        {documents.length === 0 ? (
+        {!documents || documents.length === 0 ? (
           <div className="text-center py-8 text-gray-500">
             <FileText className="h-12 w-12 mx-auto mb-2 opacity-50" />
             <p>No documents uploaded yet</p>
