@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { AxiosError } from 'axios'
 import { metricsService } from '../services/metricsService'
 import { runHistoryService } from '../services/runHistoryService'
@@ -41,6 +41,7 @@ export function useMetrics() {
   const [runs, setRuns] = useState<RunRecord[]>([])
   const [selectedRunIds, setSelectedRunIds] = useState<string[]>([])
   const [runComparison, setRunComparison] = useState<RunComparison | null>(null)
+  const latestRunComparisonKey = useRef<string | null>(null)
 
   // Helper to update specific loading flag
   const setOperationLoading = useCallback((operation: 'metrics' | 'comparison' | 'runs' | 'runComparison', isLoading: boolean) => {
@@ -169,15 +170,23 @@ export function useMetrics() {
 
   const fetchRunComparison = useCallback(async (runIds: string[]) => {
     if (runIds.length === 0) {
+      latestRunComparisonKey.current = null
+      setOperationLoading('runComparison', false)
+      setOperationError('runComparison', null)
       setRunComparison(null)
       return
     }
 
     setOperationLoading('runComparison', true)
     setOperationError('runComparison', null)
+    const requestKey = JSON.stringify([...runIds].sort())
+    latestRunComparisonKey.current = requestKey
 
     try {
       const data = await runHistoryService.compareRuns(runIds)
+      if (latestRunComparisonKey.current !== requestKey) {
+        return
+      }
       setRunComparison(data)
       setOperationError('runComparison', null)
     } catch (err: unknown) {
@@ -187,7 +196,9 @@ export function useMetrics() {
         setOperationError('runComparison', 'Failed to compare runs')
       }
     } finally {
-      setOperationLoading('runComparison', false)
+      if (latestRunComparisonKey.current === requestKey) {
+        setOperationLoading('runComparison', false)
+      }
     }
   }, [setOperationLoading, setOperationError])
 
@@ -202,6 +213,9 @@ export function useMetrics() {
     if (selectedRunIds.length > 0) {
       fetchRunComparison(selectedRunIds)
     } else {
+      latestRunComparisonKey.current = null
+      setOperationLoading('runComparison', false)
+      setOperationError('runComparison', null)
       setRunComparison(null)
     }
   }, [selectedRunIds, fetchRunComparison])
