@@ -162,10 +162,10 @@ Terminal 2 - Frontend:
 ```bash
 # Install frontend dependencies (first time only)
 cd frontend
-npm install
+pnpm install  # or: npm install
 
 # Start frontend dev server
-npm run dev
+pnpm dev      # or: npm run dev
 
 # Access the web UI at http://localhost:5173
 ```
@@ -533,15 +533,11 @@ curl http://localhost:8000/api/runs/{run_id}
 # Get run history statistics
 curl http://localhost:8000/api/runs/stats
 
-# Compare multiple runs
-curl -X POST http://localhost:8000/api/runs/compare \
-  -H "Content-Type: application/json" \
-  -d '{
-    "run_ids": ["run-id-1", "run-id-2", "run-id-3"]
-  }'
+# Compare multiple runs (GET with query params)
+curl "http://localhost:8000/api/runs/compare?run_ids=run-id-1,run-id-2,run-id-3"
 
-# Clear run history
-curl -X DELETE http://localhost:8000/api/runs
+# Clear run history (POST)
+curl -X POST http://localhost:8000/api/runs/clear
 ```
 
 **Example Experimentation Workflow:**
@@ -566,9 +562,7 @@ curl -X POST http://localhost:8000/api/chat \
 curl http://localhost:8000/api/runs
 
 # 6. Compare runs (use actual run IDs from step 5)
-curl -X POST http://localhost:8000/api/runs/compare \
-  -H "Content-Type: application/json" \
-  -d '{"run_ids": ["<baseline-run-id>", "<rag-run-id>"]}'
+curl "http://localhost:8000/api/runs/compare?run_ids=<baseline-run-id>,<rag-run-id>"
 ```
 
 For complete API documentation, see [docs/PHASE2_API_DOCUMENTATION.md](docs/PHASE2_API_DOCUMENTATION.md).
