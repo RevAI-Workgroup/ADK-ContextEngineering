@@ -31,17 +31,30 @@ export function Chat() {
 
   // Fetch available tools when config changes
   useEffect(() => {
+    let cancelled = false
+
     const fetchTools = async () => {
       try {
         const tools = await agentService.getTools(config)
-        setAvailableTools(tools)
+        // Only update state if this effect hasn't been cancelled
+        if (!cancelled) {
+          setAvailableTools(tools)
+        }
       } catch (error) {
         console.error('Failed to fetch tools:', error)
-        // Set default tools on error
-        setAvailableTools([])
+        // Only update state if this effect hasn't been cancelled
+        if (!cancelled) {
+          setAvailableTools([])
+        }
       }
     }
+
     fetchTools()
+
+    // Cleanup function to mark this request as cancelled
+    return () => {
+      cancelled = true
+    }
   }, [config])
 
   // Auto-dismiss success messages after 5 seconds with proper cleanup
