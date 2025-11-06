@@ -14,6 +14,8 @@ import json
 from pathlib import Path
 from datetime import datetime
 
+from src.core.tracing import record_metric, get_metrics_instruments
+
 
 @dataclass
 class MetricResult:
@@ -282,14 +284,31 @@ class MetricsCollector:
         if ground_truth:
             rouge_metrics = self.calculate_rouge_scores(response, ground_truth)
             result.metrics.update(rouge_metrics)
+            
+            # Record accuracy metric (using rouge1_f1 as proxy)
+            if 'rouge1_f1' in rouge_metrics:
+                record_metric("accuracy", rouge_metrics['rouge1_f1'].value)
         
         # Calculate relevance score
         relevance = self.calculate_relevance_score(query, response, retrieved_docs)
         result.metrics['relevance_score'] = relevance
+        record_metric("relevance_score", relevance.value)
         
         # Detect hallucinations
         hallucination = self.detect_hallucination_heuristic(response, context)
         result.metrics['hallucination_rate'] = hallucination
+        record_metric("hallucination_rate", hallucination.value)
+        
+        # Calculate context utilization
+        if context:
+            context_utilization = min(1.0, len(response) / len(context)) if len(context) > 0 else 0.0
+            record_metric("context_utilization", context_utilization)
+        else:
+            record_metric("context_utilization", 0.0)
+        
+        # Record efficiency metrics
+        record_metric("latency", latency_ms)
+        record_metric("tokens_per_query", float(result.token_count))
         
         # Store result
         self.results.append(result)
@@ -375,7 +394,14 @@ class MetricsCollector:
         # Add token counts if available
         response = response_data.get("response", "")
         if response:
-            metrics["token_count"] = self.count_tokens(response)
+            token_count = self.count_tokens(response)
+            metrics["token_count"] = token_count
+            # Record tokens metric
+            record_metric("tokens_per_query", float(token_count))
+        
+        # Record latency if available
+        if "latency_ms" in metrics:
+            record_metric("latency", float(metrics["latency_ms"]))
         
         return metrics
     

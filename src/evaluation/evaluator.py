@@ -13,6 +13,7 @@ import threading
 
 from .metrics import MetricsCollector
 from .benchmarks import BenchmarkDataset
+from src.core.tracing import trace_span, record_metric, record_throughput
 
 
 class EvaluationTimeoutError(Exception):
@@ -162,83 +163,121 @@ class Evaluator:
         results = []
         failures = []
         
-        for i, test_case in enumerate(dataset, 1):
-            print(f"[{i}/{len(dataset)}] Processing: {test_case.id}")
+        with trace_span(
+            "evaluator.evaluate",
+            attributes={
+                "phase": phase,
+                "dataset": dataset.name,
+                "test_cases_count": len(dataset),
+                "timeout_seconds": self.timeout_seconds
+            }
+        ) as span:
+            for i, test_case in enumerate(dataset, 1):
+                print(f"[{i}/{len(dataset)}] Processing: {test_case.id}")
+                
+                with trace_span(
+                    "evaluator.test_case",
+                    attributes={
+                        "test_case_id": test_case.id,
+                        "phase": phase,
+                        "has_ground_truth": bool(test_case.ground_truth)
+                    }
+                ) as test_span:
+                    try:
+                        # Measure latency with timeout protection (cross-platform)
+                        start_time = time.time()
+                        
+                        # Call system with timeout protection
+                        response = call_with_timeout(
+                            func=system,
+                            args=(test_case.query,),
+                            timeout_seconds=self.timeout_seconds
+                        )
+                        
+                        latency_ms = (time.time() - start_time) * 1000
+                        test_span.set_attribute("latency_ms", latency_ms)
+                        
+                        # Validate response type
+                        if not isinstance(response, str):
+                            raise TypeError(
+                                f"System must return str, got {type(response).__name__}. "
+                                f"Response: {response}"
+                            )
+                        
+                        # Evaluate response
+                        eval_result = self.metrics_collector.evaluate(
+                            query=test_case.query,
+                            response=response,
+                            ground_truth=test_case.ground_truth,
+                            context=test_case.context,
+                            latency_ms=latency_ms
+                        )
+                        
+                        results.append(eval_result)
+                        
+                        # Record throughput
+                        record_throughput({"phase": phase, "dataset": dataset.name})
+                        
+                        # Add metrics to span
+                        if 'rouge1_f1' in eval_result.metrics:
+                            test_span.set_attribute("rouge1_f1", eval_result.metrics['rouge1_f1'].value)
+                        if 'relevance_score' in eval_result.metrics:
+                            test_span.set_attribute("relevance_score", eval_result.metrics['relevance_score'].value)
+                        if 'hallucination_rate' in eval_result.metrics:
+                            test_span.set_attribute("hallucination_rate", eval_result.metrics['hallucination_rate'].value)
+                        
+                        # Print quick summary
+                        if test_case.ground_truth:
+                            rouge1 = eval_result.metrics.get('rouge1_f1')
+                            if rouge1:
+                                print(f"  -> ROUGE-1: {rouge1.value:.3f}, Latency: {latency_ms:.0f}ms")
+                        else:
+                            print(f"  -> Latency: {latency_ms:.0f}ms")
+                
+                    except EvaluationTimeoutError:
+                        error_msg = f"Timeout after {self.timeout_seconds}s"
+                        print(f"  [ERROR] {error_msg}")
+                        test_span.set_attribute("error", error_msg)
+                        test_span.set_attribute("error_type", "EvaluationTimeoutError")
+                        failures.append({
+                            'test_case_id': test_case.id,
+                            'query': test_case.query,
+                            'error_type': 'EvaluationTimeoutError',
+                            'error_message': error_msg,
+                            'timestamp': datetime.now().isoformat()
+                        })
+                        continue
+                        
+                    except TypeError as e:
+                        error_msg = f"Type validation failed: {e}"
+                        print(f"  [ERROR] {error_msg}")
+                        test_span.set_attribute("error", str(e))
+                        test_span.set_attribute("error_type", "TypeError")
+                        failures.append({
+                            'test_case_id': test_case.id,
+                            'query': test_case.query,
+                            'error_type': 'TypeError',
+                            'error_message': str(e),
+                            'timestamp': datetime.now().isoformat()
+                        })
+                        continue
+                        
+                    except Exception as e:
+                        error_msg = f"Unexpected error: {e}"
+                        print(f"  [ERROR] {error_msg}")
+                        test_span.set_attribute("error", str(e))
+                        test_span.set_attribute("error_type", type(e).__name__)
+                        failures.append({
+                            'test_case_id': test_case.id,
+                            'query': test_case.query,
+                            'error_type': type(e).__name__,
+                            'error_message': str(e),
+                            'timestamp': datetime.now().isoformat()
+                        })
+                        continue
             
-            try:
-                # Measure latency with timeout protection (cross-platform)
-                start_time = time.time()
-                
-                # Call system with timeout protection
-                response = call_with_timeout(
-                    func=system,
-                    args=(test_case.query,),
-                    timeout_seconds=self.timeout_seconds
-                )
-                
-                latency_ms = (time.time() - start_time) * 1000
-                
-                # Validate response type
-                if not isinstance(response, str):
-                    raise TypeError(
-                        f"System must return str, got {type(response).__name__}. "
-                        f"Response: {response}"
-                    )
-                
-                # Evaluate response
-                eval_result = self.metrics_collector.evaluate(
-                    query=test_case.query,
-                    response=response,
-                    ground_truth=test_case.ground_truth,
-                    context=test_case.context,
-                    latency_ms=latency_ms
-                )
-                
-                results.append(eval_result)
-                
-                # Print quick summary
-                if test_case.ground_truth:
-                    rouge1 = eval_result.metrics.get('rouge1_f1')
-                    if rouge1:
-                        print(f"  -> ROUGE-1: {rouge1.value:.3f}, Latency: {latency_ms:.0f}ms")
-                else:
-                    print(f"  -> Latency: {latency_ms:.0f}ms")
-                
-            except EvaluationTimeoutError:
-                error_msg = f"Timeout after {self.timeout_seconds}s"
-                print(f"  [ERROR] {error_msg}")
-                failures.append({
-                    'test_case_id': test_case.id,
-                    'query': test_case.query,
-                    'error_type': 'EvaluationTimeoutError',
-                    'error_message': error_msg,
-                    'timestamp': datetime.now().isoformat()
-                })
-                continue
-                
-            except TypeError as e:
-                error_msg = f"Type validation failed: {e}"
-                print(f"  [ERROR] {error_msg}")
-                failures.append({
-                    'test_case_id': test_case.id,
-                    'query': test_case.query,
-                    'error_type': 'TypeError',
-                    'error_message': str(e),
-                    'timestamp': datetime.now().isoformat()
-                })
-                continue
-                
-            except Exception as e:
-                error_msg = f"Unexpected error: {e}"
-                print(f"  [ERROR] {error_msg}")
-                failures.append({
-                    'test_case_id': test_case.id,
-                    'query': test_case.query,
-                    'error_type': type(e).__name__,
-                    'error_message': str(e),
-                    'timestamp': datetime.now().isoformat()
-                })
-                continue
+            span.set_attribute("successful_evaluations", len(results))
+            span.set_attribute("failed_evaluations", len(failures))
         
         # Calculate aggregate metrics
         aggregates = self.metrics_collector.get_aggregate_metrics()
