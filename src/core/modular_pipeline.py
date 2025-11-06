@@ -344,7 +344,7 @@ class NaiveRAGModule(ContextEngineeringModule):
 
             else:
                 # No results above threshold
-                context.metadata["rag_status"] = "no_results"
+                context.metadata["rag_status"] = "empty"
                 context.metadata["rag_message"] = (
                     f"No documents found above similarity threshold {self.similarity_threshold}"
                 )
