@@ -11,6 +11,7 @@ import { useChatContext } from '../contexts/ChatContext'
 import { modelsService } from '../services/modelsService'
 import { useState, useEffect, useRef } from 'react'
 import { Alert, AlertDescription } from '../components/ui/alert'
+import { ContextEngineeringConfig } from '../types/config.types'
 
 export function Chat() {
   const { clearChat, messages, config, setConfig } = useChatContext()
@@ -103,7 +104,7 @@ export function Chat() {
     setShowComparison(true)
   }
 
-  const handleRerunWithConfig = (query: string, newConfig: any) => {
+  const handleRerunWithConfig = (query: string, newConfig: ContextEngineeringConfig) => {
     setConfig(newConfig)
     // Show notification to inform user that config has been applied
     setRerunMessage({ query })
