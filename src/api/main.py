@@ -14,16 +14,25 @@ from fastapi.responses import JSONResponse
 import logging
 from datetime import datetime
 
-from src.api.endpoints import chat_router, metrics_router, tools_router, models_router
-from src.api.adk_wrapper import ADKAgentWrapper
-from src.evaluation.metrics import MetricsCollector
-
-# Configure logging
+# Configure logging first
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# OpenTelemetry FastAPI instrumentation
+try:
+    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+    FASTAPI_INSTRUMENTATION_AVAILABLE = True
+except ImportError:
+    FASTAPI_INSTRUMENTATION_AVAILABLE = False
+    logger.warning("OpenTelemetry FastAPI instrumentation not available")
+
+from src.api.endpoints import chat_router, metrics_router, tools_router, models_router
+from src.api.adk_wrapper import ADKAgentWrapper
+from src.evaluation.metrics import MetricsCollector
+from src.core.tracing import initialize_tracing, update_memory_usage, record_throughput
 
 
 @asynccontextmanager
@@ -34,12 +43,27 @@ async def lifespan(app: FastAPI):
     Handles initialization and cleanup of singleton instances:
     - ADK Agent Wrapper
     - Metrics Collector
+    - OpenTelemetry tracing
     """
     # Startup: Initialize shared instances
     logger.info("Initializing application dependencies...")
     
+    # Initialize OpenTelemetry tracing (must be done before recording metrics)
+    try:
+        initialize_tracing()
+        logger.info("OpenTelemetry tracing initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize OpenTelemetry tracing: {e}", exc_info=True)
+        # Don't fail startup, but log the error clearly
+    
     app.state.adk_wrapper = ADKAgentWrapper()
     app.state.metrics_collector = MetricsCollector()
+    
+    # Update memory usage metric on startup
+    try:
+        update_memory_usage()
+    except Exception as e:
+        logger.debug(f"Could not update memory metric: {e}")
     
     logger.info("Application dependencies initialized successfully")
     
@@ -95,6 +119,14 @@ app.include_router(chat_router, prefix="/api", tags=["chat"])
 app.include_router(metrics_router, prefix="/api", tags=["metrics"])
 app.include_router(tools_router, prefix="/api", tags=["tools"])
 app.include_router(models_router, prefix="/api", tags=["models"])
+
+# Instrument FastAPI with OpenTelemetry
+if FASTAPI_INSTRUMENTATION_AVAILABLE:
+    try:
+        FastAPIInstrumentor.instrument_app(app)
+        logger.info("FastAPI instrumented with OpenTelemetry")
+    except Exception as e:
+        logger.warning(f"Failed to instrument FastAPI: {e}")
 
 
 # Global exception handler
