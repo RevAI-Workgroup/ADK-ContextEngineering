@@ -1303,7 +1303,7 @@ async def ingest_documents(request: DocumentIngestRequest):
         vector_store = get_vector_store()
         chunk_texts = [chunk.text for chunk in all_chunks]
         chunk_metadatas = [chunk.metadata for chunk in all_chunks]
-        chunk_ids = vector_store.add_documents(
+        vector_store.add_documents(
             texts=chunk_texts,
             metadatas=chunk_metadatas
         )
