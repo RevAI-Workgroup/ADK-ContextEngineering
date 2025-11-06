@@ -16,6 +16,7 @@ import asyncio
 
 from src.api.adk_wrapper import ADKAgentWrapper
 from src.evaluation.metrics import MetricsCollector
+from src.core.tracing import trace_span, record_metric, record_throughput, update_memory_usage
 
 logger = logging.getLogger(__name__)
 
@@ -90,34 +91,69 @@ async def chat(
     This endpoint provides synchronous chat interaction.
     For real-time streaming, use the WebSocket endpoint /api/chat/ws
     """
-    logger.debug(
-        "Received chat message for model %s", message.model or "default"
-    )
+    import time
+    start_time = time.time()
     
-    try:
-        # Process message through ADK agent with specified model
-        result = await adk_wrapper.process_message(
-            message=message.message,
-            session_id=message.session_id,
-            include_thinking=message.include_thinking,
-            model=message.model
+    # Record throughput
+    record_throughput({"endpoint": "/api/chat"})
+    
+    with trace_span(
+        "api.chat.post",
+        attributes={
+            "endpoint": "/api/chat",
+            "model": message.model or "default",
+            "session_id": message.session_id or "none",
+            "message_length": len(message.message),
+            "include_thinking": message.include_thinking
+        }
+    ) as span:
+        logger.debug(
+            "Received chat message for model %s", message.model or "default"
         )
         
-        # Collect metrics
-        metrics = metrics_collector.collect_response_metrics(result)
-        
-        return ChatResponse(
-            response=result.get("response", ""),
-            thinking_steps=result.get("thinking_steps"),
-            tool_calls=result.get("tool_calls"),
-            metrics=metrics,
-            timestamp=datetime.now(timezone.utc).isoformat(),
-            model=result.get("model", message.model),
-        )
-        
-    except Exception as e:
-        logger.error(f"Error processing chat message: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        try:
+            # Process message through ADK agent with specified model
+            result = await adk_wrapper.process_message(
+                message=message.message,
+                session_id=message.session_id,
+                include_thinking=message.include_thinking,
+                model=message.model
+            )
+            
+            # Collect metrics
+            metrics = metrics_collector.collect_response_metrics(result)
+            
+            # Record latency
+            latency_ms = (time.time() - start_time) * 1000
+            record_metric("latency", latency_ms, {
+                "endpoint": "/api/chat",
+                "model": message.model or "default"
+            })
+            
+            # Record tokens if available
+            if "token_count" in metrics:
+                record_metric("tokens_per_query", float(metrics["token_count"]), {
+                    "endpoint": "/api/chat",
+                    "model": message.model or "default"
+                })
+            
+            span.set_attribute("response_length", len(result.get("response", "")))
+            span.set_attribute("latency_ms", latency_ms)
+            span.set_attribute("tool_calls_count", len(result.get("tool_calls", []) or []) or 0)
+            
+            return ChatResponse(
+                response=result.get("response", ""),
+                thinking_steps=result.get("thinking_steps"),
+                tool_calls=result.get("tool_calls"),
+                metrics=metrics,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                model=result.get("model", message.model),
+            )
+            
+        except Exception as e:
+            span.set_attribute("error", str(e))
+            logger.error(f"Error processing chat message: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail=str(e))
 
 
 @chat_router.websocket("/chat/ws")
@@ -141,14 +177,20 @@ async def chat_websocket(websocket: WebSocket):
         "timestamp": "ISO-8601 timestamp"
     }
     """
+    import time
+    
     await websocket.accept()
     logger.info("WebSocket connection established")
+    
+    # Record throughput
+    record_throughput({"endpoint": "/api/chat/ws"})
     
     # Get dependencies from app state
     adk_wrapper = websocket.app.state.adk_wrapper
     
     try:
         while True:
+            start_time = time.time()
             # Receive message from client
             data = await websocket.receive_text()
             
@@ -181,17 +223,38 @@ async def chat_websocket(websocket: WebSocket):
             selected_model = message_data.get("selectedModel")
             logger.info(f"Processing WebSocket message with model: {selected_model or 'default'}")
             
-            # Process message with streaming
-            async for event in adk_wrapper.process_message_stream(
-                message=message_data["message"],
-                session_id=message_data.get("session_id"),
-                model=selected_model
-            ):
-                await websocket.send_json({
-                    "type": event["type"],
-                    "data": event["data"],
-                    "timestamp": datetime.now(timezone.utc).isoformat()
+            with trace_span(
+                "api.chat.websocket",
+                attributes={
+                    "endpoint": "/api/chat/ws",
+                    "model": selected_model or "default",
+                    "session_id": message_data.get("session_id", "none"),
+                    "message_length": len(message_data.get("message", ""))
+                }
+            ) as span:
+                # Process message with streaming
+                event_count = 0
+                async for event in adk_wrapper.process_message_stream(
+                    message=message_data["message"],
+                    session_id=message_data.get("session_id"),
+                    model=selected_model
+                ):
+                    event_count += 1
+                    await websocket.send_json({
+                        "type": event["type"],
+                        "data": event["data"],
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    })
+                
+                # Record latency
+                latency_ms = (time.time() - start_time) * 1000
+                record_metric("latency", latency_ms, {
+                    "endpoint": "/api/chat/ws",
+                    "model": selected_model or "default"
                 })
+                
+                span.set_attribute("latency_ms", latency_ms)
+                span.set_attribute("event_count", event_count)
             
             # Send completion signal
             await websocket.send_json({
@@ -231,15 +294,19 @@ async def get_metrics(
     - RAG metrics (Phase 2+)
     - Context engineering metrics
     """
-    try:
-        metrics = metrics_collector.get_all_metrics()
-        return {
-            "metrics": metrics,
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }
-    except Exception as e:
-        logger.error(f"Error fetching metrics: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+    with trace_span("api.metrics.get", attributes={"endpoint": "/api/metrics"}):
+        try:
+            # Update memory usage before returning metrics
+            update_memory_usage()
+            
+            metrics = metrics_collector.get_all_metrics()
+            return {
+                "metrics": metrics,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+        except Exception as e:
+            logger.error(f"Error fetching metrics: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail=str(e))
 
 
 @metrics_router.get("/metrics/phase/{phase_id}")
@@ -305,12 +372,13 @@ async def get_tools(
     Returns information about each tool including name, description,
     and parameters.
     """
-    try:
-        tools = adk_wrapper.get_available_tools()
-        return tools
-    except Exception as e:
-        logger.error(f"Error fetching tools: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+    with trace_span("api.tools.get", attributes={"endpoint": "/api/tools"}):
+        try:
+            tools = adk_wrapper.get_available_tools()
+            return tools
+        except Exception as e:
+            logger.error(f"Error fetching tools: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail=str(e))
 
 
 @tools_router.get("/tools/{tool_name}")

@@ -20,6 +20,7 @@ from google.adk import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
 from src.core.config import get_config
+from src.core.tracing import trace_span, record_metric, get_tracer
 
 logger = logging.getLogger(__name__)
 
@@ -145,99 +146,114 @@ class ADKAgentWrapper:
         """
         logger.info(f"Processing message with model '{model or 'default'}': {message[:50]}...")
         start_time = time.time()
+        resolved_model = model if model else "default"
         
-        try:
-            # Get the appropriate runner for the specified model
-            runner = self._get_or_create_runner(model)
-            
-            # Track the resolved model (use "default" if model is None)
-            resolved_model = model if model else "default"
-            
-            # Generate unique IDs if needed
-            if not session_id:
-                session_id = f"session-{uuid.uuid4().hex[:8]}"
-            user_id = "api-user"
-            
-            # Create message content
-            content = types.Content(
-                role='user',
-                parts=[types.Part(text=message)]
-            )
-            
-            # Run agent and collect events
-            logger.info(f"Invoking agent via Runner for session {session_id}")
-            
-            # Use run_async since we're already in an async context
-            # This avoids thread-safety issues with InMemorySessionService
-            events_list = await self._run_agent_async(user_id, session_id, content, runner)
-            
-            logger.info(f"Received {len(events_list)} events from agent")
-            
-            # Process events to extract response
-            response_text = ""
-            tool_calls = []
-            thinking_steps = []
-            
-            for idx, event in enumerate(events_list):
-                event_type = type(event).__name__
-                logger.debug(f"Processing event {idx}: {event_type}")
+        with trace_span(
+            "adk_wrapper.process_message",
+            attributes={
+                "model": resolved_model,
+                "session_id": session_id or "none",
+                "message_length": len(message),
+                "include_thinking": include_thinking
+            }
+        ) as span:
+            try:
+                # Get the appropriate runner for the specified model
+                runner = self._get_or_create_runner(model)
                 
-                # Extract text from content
-                if hasattr(event, 'content') and event.content:
-                    if hasattr(event.content, 'parts'):
-                        for part in event.content.parts:
-                            if hasattr(part, 'text') and part.text:
-                                text = part.text
-                                logger.info(f"Extracted text from event {idx}: {text[:100]}")
-                                response_text = text
+                # Generate unique IDs if needed
+                if not session_id:
+                    session_id = f"session-{uuid.uuid4().hex[:8]}"
+                user_id = "api-user"
                 
-                # Look for tool call information
-                if 'tool' in event_type.lower():
-                    tool_calls.append({
-                        "name": event_type,
-                        "description": f"Tool invocation: {event_type}",
+                # Create message content
+                content = types.Content(
+                    role='user',
+                    parts=[types.Part(text=message)]
+                )
+                
+                # Run agent and collect events
+                logger.info(f"Invoking agent via Runner for session {session_id}")
+                
+                # Use run_async since we're already in an async context
+                # This avoids thread-safety issues with InMemorySessionService
+                events_list = await self._run_agent_async(user_id, session_id, content, runner)
+                
+                logger.info(f"Received {len(events_list)} events from agent")
+                span.set_attribute("event_count", len(events_list))
+            
+                # Process events to extract response
+                response_text = ""
+                tool_calls = []
+                thinking_steps = []
+                
+                for idx, event in enumerate(events_list):
+                    event_type = type(event).__name__
+                    logger.debug(f"Processing event {idx}: {event_type}")
+                    
+                    # Extract text from content
+                    if hasattr(event, 'content') and event.content:
+                        if hasattr(event.content, 'parts'):
+                            for part in event.content.parts:
+                                if hasattr(part, 'text') and part.text:
+                                    text = part.text
+                                    logger.info(f"Extracted text from event {idx}: {text[:100]}")
+                                    response_text = text
+                    
+                    # Look for tool call information
+                    if 'tool' in event_type.lower():
+                        tool_calls.append({
+                            "name": event_type,
+                            "description": f"Tool invocation: {event_type}",
+                            "timestamp": datetime.utcnow().isoformat()
+                        })
+                
+                if response_text:
+                    logger.info(f"Agent response received: {response_text[:200]}...")
+                else:
+                    logger.warning(f"No response text extracted from {len(events_list)} events")
+                
+                # Build response data
+                response_data = {
+                    "response": response_text,
+                    "thinking_steps": thinking_steps if include_thinking else None,
+                    "tool_calls": tool_calls if tool_calls else None,
+                    "model": resolved_model
+                }
+                
+                # Calculate metrics
+                end_time = time.time()
+                latency_ms = (end_time - start_time) * 1000
+                
+                response_data["metrics"] = {
+                    "latency_ms": latency_ms,
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "session_id": session_id
+                }
+                
+                # Record metrics
+                record_metric("latency", latency_ms, {"component": "adk_wrapper", "model": resolved_model})
+                span.set_attribute("latency_ms", latency_ms)
+                span.set_attribute("response_length", len(response_text))
+                span.set_attribute("tool_calls_count", len(tool_calls))
+                
+                # Store in session if session_id provided
+                if session_id:
+                    if session_id not in self.sessions:
+                        self.sessions[session_id] = {"messages": []}
+                    self.sessions[session_id]["messages"].append({
+                        "message": message,
+                        "response": response_data,
                         "timestamp": datetime.utcnow().isoformat()
                     })
-            
-            if response_text:
-                logger.info(f"Agent response received: {response_text[:200]}...")
-            else:
-                logger.warning(f"No response text extracted from {len(events_list)} events")
-            
-            # Build response data
-            response_data = {
-                "response": response_text,
-                "thinking_steps": thinking_steps if include_thinking else None,
-                "tool_calls": tool_calls if tool_calls else None,
-                "model": resolved_model
-            }
-            
-            # Calculate metrics
-            end_time = time.time()
-            latency_ms = (end_time - start_time) * 1000
-            
-            response_data["metrics"] = {
-                "latency_ms": latency_ms,
-                "timestamp": datetime.utcnow().isoformat(),
-                "session_id": session_id
-            }
-            
-            # Store in session if session_id provided
-            if session_id:
-                if session_id not in self.sessions:
-                    self.sessions[session_id] = {"messages": []}
-                self.sessions[session_id]["messages"].append({
-                    "message": message,
-                    "response": response_data,
-                    "timestamp": datetime.utcnow().isoformat()
-                })
-            
-            logger.info(f"Message processed in {latency_ms:.2f}ms")
-            return response_data
-            
-        except Exception as e:
-            logger.error(f"Error processing message: {e}", exc_info=True)
-            raise
+                
+                logger.info(f"Message processed in {latency_ms:.2f}ms")
+                return response_data
+                
+            except Exception as e:
+                span.set_attribute("error", str(e))
+                logger.error(f"Error processing message: {e}", exc_info=True)
+                raise
     
     async def _run_agent_async(self, user_id: str, session_id: str, content, runner: Runner):
         """
@@ -251,57 +267,68 @@ class ADKAgentWrapper:
             runner: Runner instance to use for this request
         """
         events_list = []
-        try:
-            # Create or get session
-            session_created = False
+        with trace_span(
+            "adk_wrapper._run_agent_async",
+            attributes={
+                "user_id": user_id,
+                "session_id": session_id
+            }
+        ) as span:
             try:
-                logger.info(f"Attempting to get existing session: {session_id}")
-                existing_session = await self.session_service.get_session(
-                    app_name='agents',
-                    user_id=user_id,
-                    session_id=session_id
-                )
-                logger.info(f"Found existing session: {existing_session.id}")
-            except Exception as e:
-                # Session doesn't exist, create it
-                logger.info(f"Session not found ({type(e).__name__}), creating new session: {session_id}")
+                # Create or get session
+                session_created = False
                 try:
-                    new_session = await self.session_service.create_session(
+                    logger.info(f"Attempting to get existing session: {session_id}")
+                    existing_session = await self.session_service.get_session(
                         app_name='agents',
                         user_id=user_id,
                         session_id=session_id
                     )
-                    session_created = True
-                    logger.info(f"Successfully created session: {new_session.id}")
-                    
-                    # Verify we can retrieve it
-                    verify_session = await self.session_service.get_session(
-                        app_name='agents',
-                        user_id=user_id,
-                        session_id=session_id
-                    )
-                    logger.info(f"Verified session retrieval: {verify_session.id}")
-                except Exception as create_error:
-                    logger.error(f"Failed to create session: {create_error}", exc_info=True)
-                    raise
+                    logger.info(f"Found existing session: {existing_session.id}")
+                except Exception as e:
+                    # Session doesn't exist, create it
+                    logger.info(f"Session not found ({type(e).__name__}), creating new session: {session_id}")
+                    try:
+                        new_session = await self.session_service.create_session(
+                            app_name='agents',
+                            user_id=user_id,
+                            session_id=session_id
+                        )
+                        session_created = True
+                        logger.info(f"Successfully created session: {new_session.id}")
+                        
+                        # Verify we can retrieve it
+                        verify_session = await self.session_service.get_session(
+                            app_name='agents',
+                            user_id=user_id,
+                            session_id=session_id
+                        )
+                        logger.info(f"Verified session retrieval: {verify_session.id}")
+                    except Exception as create_error:
+                        logger.error(f"Failed to create session: {create_error}", exc_info=True)
+                        raise
+                
+                span.set_attribute("session_created", session_created)
+                
+                # Run the agent asynchronously using the provided runner
+                logger.info(f"Starting async agent run for session {session_id} (created={session_created})")
+                async for event in runner.run_async(
+                    user_id=user_id,
+                    session_id=session_id,
+                    new_message=content
+                ):
+                    events_list.append(event)
+                    event_type = type(event).__name__
+                    logger.debug(f"Event received: {event_type}")
+                
+                logger.info(f"Agent run complete, collected {len(events_list)} events")
+                span.set_attribute("event_count", len(events_list))
+            except Exception as e:
+                span.set_attribute("error", str(e))
+                logger.error(f"Error in _run_agent_async: {e}", exc_info=True)
+                raise
             
-            # Run the agent asynchronously using the provided runner
-            logger.info(f"Starting async agent run for session {session_id} (created={session_created})")
-            async for event in runner.run_async(
-                user_id=user_id,
-                session_id=session_id,
-                new_message=content
-            ):
-                events_list.append(event)
-                event_type = type(event).__name__
-                logger.debug(f"Event received: {event_type}")
-            
-            logger.info(f"Agent run complete, collected {len(events_list)} events")
-        except Exception as e:
-            logger.error(f"Error in _run_agent_async: {e}", exc_info=True)
-            raise
-        
-        return events_list
+            return events_list
     
     async def process_message_stream(
         self,
