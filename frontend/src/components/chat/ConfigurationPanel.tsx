@@ -66,11 +66,12 @@ export function ConfigurationPanel({ config, onConfigChange, className }: Config
   }
 
   const handleTechniqueToggle = (technique: keyof ContextEngineeringConfig, enabled: boolean) => {
-    const newConfig = { ...config }
-    const techniqueConfig = newConfig[technique]
+    const techniqueConfig = config[technique]
     if (typeof techniqueConfig === 'object' && techniqueConfig !== null && 'enabled' in techniqueConfig) {
-      techniqueConfig.enabled = enabled
-      onConfigChange(newConfig)
+      onConfigChange({
+        ...config,
+        [technique]: { ...techniqueConfig, enabled }
+      })
     }
   }
 
@@ -291,9 +292,10 @@ export function ConfigurationPanel({ config, onConfigChange, className }: Config
                       <Slider
                         value={[config.naive_rag.chunk_overlap]}
                         onValueChange={([value]) => {
-                          const newConfig = { ...config }
-                          newConfig.naive_rag.chunk_overlap = value
-                          onConfigChange(newConfig)
+                          onConfigChange({
+                            ...config,
+                            naive_rag: { ...config.naive_rag, chunk_overlap: value }
+                          })
                         }}
                         min={0}
                         max={512}
@@ -306,9 +308,10 @@ export function ConfigurationPanel({ config, onConfigChange, className }: Config
                       <Slider
                         value={[config.naive_rag.top_k]}
                         onValueChange={([value]) => {
-                          const newConfig = { ...config }
-                          newConfig.naive_rag.top_k = value
-                          onConfigChange(newConfig)
+                          onConfigChange({
+                            ...config,
+                            naive_rag: { ...config.naive_rag, top_k: value }
+                          })
                         }}
                         min={1}
                         max={20}
@@ -321,9 +324,10 @@ export function ConfigurationPanel({ config, onConfigChange, className }: Config
                       <Slider
                         value={[config.naive_rag.similarity_threshold]}
                         onValueChange={([value]) => {
-                          const newConfig = { ...config }
-                          newConfig.naive_rag.similarity_threshold = value
-                          onConfigChange(newConfig)
+                          onConfigChange({
+                            ...config,
+                            naive_rag: { ...config.naive_rag, similarity_threshold: value }
+                          })
                         }}
                         min={0}
                         max={1}
@@ -344,9 +348,10 @@ export function ConfigurationPanel({ config, onConfigChange, className }: Config
                       <Input
                         value={config.rag_tool.tool_name}
                         onChange={(e) => {
-                          const newConfig = { ...config }
-                          newConfig.rag_tool.tool_name = e.target.value
-                          onConfigChange(newConfig)
+                          onConfigChange({
+                            ...config,
+                            rag_tool: { ...config.rag_tool, tool_name: e.target.value }
+                          })
                         }}
                         placeholder="search_knowledge_base"
                       />
@@ -357,9 +362,10 @@ export function ConfigurationPanel({ config, onConfigChange, className }: Config
                       <Input
                         value={config.rag_tool.tool_description}
                         onChange={(e) => {
-                          const newConfig = { ...config }
-                          newConfig.rag_tool.tool_description = e.target.value
-                          onConfigChange(newConfig)
+                          onConfigChange({
+                            ...config,
+                            rag_tool: { ...config.rag_tool, tool_description: e.target.value }
+                          })
                         }}
                         placeholder="Search the knowledge base for relevant information"
                       />
@@ -370,9 +376,10 @@ export function ConfigurationPanel({ config, onConfigChange, className }: Config
                       <Slider
                         value={[config.rag_tool.chunk_size]}
                         onValueChange={([value]) => {
-                          const newConfig = { ...config }
-                          newConfig.rag_tool.chunk_size = value
-                          onConfigChange(newConfig)
+                          onConfigChange({
+                            ...config,
+                            rag_tool: { ...config.rag_tool, chunk_size: value }
+                          })
                         }}
                         min={128}
                         max={2048}
@@ -385,9 +392,10 @@ export function ConfigurationPanel({ config, onConfigChange, className }: Config
                       <Slider
                         value={[config.rag_tool.chunk_overlap]}
                         onValueChange={([value]) => {
-                          const newConfig = { ...config }
-                          newConfig.rag_tool.chunk_overlap = value
-                          onConfigChange(newConfig)
+                          onConfigChange({
+                            ...config,
+                            rag_tool: { ...config.rag_tool, chunk_overlap: value }
+                          })
                         }}
                         min={0}
                         max={512}
@@ -400,9 +408,10 @@ export function ConfigurationPanel({ config, onConfigChange, className }: Config
                       <Slider
                         value={[config.rag_tool.top_k]}
                         onValueChange={([value]) => {
-                          const newConfig = { ...config }
-                          newConfig.rag_tool.top_k = value
-                          onConfigChange(newConfig)
+                          onConfigChange({
+                            ...config,
+                            rag_tool: { ...config.rag_tool, top_k: value }
+                          })
                         }}
                         min={1}
                         max={20}
@@ -415,9 +424,10 @@ export function ConfigurationPanel({ config, onConfigChange, className }: Config
                       <Slider
                         value={[config.rag_tool.similarity_threshold]}
                         onValueChange={([value]) => {
-                          const newConfig = { ...config }
-                          newConfig.rag_tool.similarity_threshold = value
-                          onConfigChange(newConfig)
+                          onConfigChange({
+                            ...config,
+                            rag_tool: { ...config.rag_tool, similarity_threshold: value }
+                          })
                         }}
                         min={0}
                         max={1}
@@ -438,9 +448,10 @@ export function ConfigurationPanel({ config, onConfigChange, className }: Config
                       <Slider
                         value={[config.compression.compression_ratio]}
                         onValueChange={([value]) => {
-                          const newConfig = { ...config }
-                          newConfig.compression.compression_ratio = value
-                          onConfigChange(newConfig)
+                          onConfigChange({
+                            ...config,
+                            compression: { ...config.compression, compression_ratio: value }
+                          })
                         }}
                         min={0.1}
                         max={0.9}
@@ -453,9 +464,10 @@ export function ConfigurationPanel({ config, onConfigChange, className }: Config
                       <Slider
                         value={[config.compression.max_compressed_tokens]}
                         onValueChange={([value]) => {
-                          const newConfig = { ...config }
-                          newConfig.compression.max_compressed_tokens = value
-                          onConfigChange(newConfig)
+                          onConfigChange({
+                            ...config,
+                            compression: { ...config.compression, max_compressed_tokens: value }
+                          })
                         }}
                         min={512}
                         max={4096}
@@ -476,9 +488,10 @@ export function ConfigurationPanel({ config, onConfigChange, className }: Config
                       <Slider
                         value={[config.reranking.top_n_after_rerank]}
                         onValueChange={([value]) => {
-                          const newConfig = { ...config }
-                          newConfig.reranking.top_n_after_rerank = value
-                          onConfigChange(newConfig)
+                          onConfigChange({
+                            ...config,
+                            reranking: { ...config.reranking, top_n_after_rerank: value }
+                          })
                         }}
                         min={1}
                         max={10}
@@ -491,9 +504,10 @@ export function ConfigurationPanel({ config, onConfigChange, className }: Config
                       <Slider
                         value={[config.reranking.rerank_threshold]}
                         onValueChange={([value]) => {
-                          const newConfig = { ...config }
-                          newConfig.reranking.rerank_threshold = value
-                          onConfigChange(newConfig)
+                          onConfigChange({
+                            ...config,
+                            reranking: { ...config.reranking, rerank_threshold: value }
+                          })
                         }}
                         min={0}
                         max={1}
@@ -514,9 +528,10 @@ export function ConfigurationPanel({ config, onConfigChange, className }: Config
                       <Slider
                         value={[config.caching.similarity_threshold]}
                         onValueChange={([value]) => {
-                          const newConfig = { ...config }
-                          newConfig.caching.similarity_threshold = value
-                          onConfigChange(newConfig)
+                          onConfigChange({
+                            ...config,
+                            caching: { ...config.caching, similarity_threshold: value }
+                          })
                         }}
                         min={0.8}
                         max={1.0}
@@ -530,9 +545,10 @@ export function ConfigurationPanel({ config, onConfigChange, className }: Config
                         type="number"
                         value={config.caching.max_cache_size}
                         onChange={(e) => {
-                          const newConfig = { ...config }
-                          newConfig.caching.max_cache_size = parseInt(e.target.value) || 1000
-                          onConfigChange(newConfig)
+                          onConfigChange({
+                            ...config,
+                            caching: { ...config.caching, max_cache_size: parseInt(e.target.value) || 1000 }
+                          })
                         }}
                         min={100}
                         max={10000}
@@ -546,9 +562,10 @@ export function ConfigurationPanel({ config, onConfigChange, className }: Config
                         type="number"
                         value={config.caching.ttl_seconds}
                         onChange={(e) => {
-                          const newConfig = { ...config }
-                          newConfig.caching.ttl_seconds = parseInt(e.target.value) || 3600
-                          onConfigChange(newConfig)
+                          onConfigChange({
+                            ...config,
+                            caching: { ...config.caching, ttl_seconds: parseInt(e.target.value) || 3600 }
+                          })
                         }}
                         min={60}
                         max={86400}
@@ -569,10 +586,14 @@ export function ConfigurationPanel({ config, onConfigChange, className }: Config
                       <Slider
                         value={[config.hybrid_search.bm25_weight]}
                         onValueChange={([value]) => {
-                          const newConfig = { ...config }
-                          newConfig.hybrid_search.bm25_weight = value
-                          newConfig.hybrid_search.vector_weight = 1.0 - value
-                          onConfigChange(newConfig)
+                          onConfigChange({
+                            ...config,
+                            hybrid_search: {
+                              ...config.hybrid_search,
+                              bm25_weight: value,
+                              vector_weight: 1.0 - value
+                            }
+                          })
                         }}
                         min={0}
                         max={1}
@@ -585,10 +606,14 @@ export function ConfigurationPanel({ config, onConfigChange, className }: Config
                       <Slider
                         value={[config.hybrid_search.vector_weight]}
                         onValueChange={([value]) => {
-                          const newConfig = { ...config }
-                          newConfig.hybrid_search.vector_weight = value
-                          newConfig.hybrid_search.bm25_weight = 1.0 - value
-                          onConfigChange(newConfig)
+                          onConfigChange({
+                            ...config,
+                            hybrid_search: {
+                              ...config.hybrid_search,
+                              vector_weight: value,
+                              bm25_weight: 1.0 - value
+                            }
+                          })
                         }}
                         min={0}
                         max={1}
@@ -601,9 +626,10 @@ export function ConfigurationPanel({ config, onConfigChange, className }: Config
                       <Slider
                         value={[config.hybrid_search.top_k_per_method]}
                         onValueChange={([value]) => {
-                          const newConfig = { ...config }
-                          newConfig.hybrid_search.top_k_per_method = value
-                          onConfigChange(newConfig)
+                          onConfigChange({
+                            ...config,
+                            hybrid_search: { ...config.hybrid_search, top_k_per_method: value }
+                          })
                         }}
                         min={1}
                         max={20}
@@ -624,9 +650,10 @@ export function ConfigurationPanel({ config, onConfigChange, className }: Config
                       <Slider
                         value={[config.memory.max_conversation_turns]}
                         onValueChange={([value]) => {
-                          const newConfig = { ...config }
-                          newConfig.memory.max_conversation_turns = value
-                          onConfigChange(newConfig)
+                          onConfigChange({
+                            ...config,
+                            memory: { ...config.memory, max_conversation_turns: value }
+                          })
                         }}
                         min={1}
                         max={20}
@@ -639,9 +666,10 @@ export function ConfigurationPanel({ config, onConfigChange, className }: Config
                       <Slider
                         value={[config.memory.summary_trigger_turns]}
                         onValueChange={([value]) => {
-                          const newConfig = { ...config }
-                          newConfig.memory.summary_trigger_turns = value
-                          onConfigChange(newConfig)
+                          onConfigChange({
+                            ...config,
+                            memory: { ...config.memory, summary_trigger_turns: value }
+                          })
                         }}
                         min={1}
                         max={10}

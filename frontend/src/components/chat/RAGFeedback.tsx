@@ -24,10 +24,21 @@ export function RAGFeedback({ metadata }: RAGFeedbackProps) {
   // Debug: log what we received
   console.log('[RAGFeedback] metadata:', metadata)
 
-  // Determine which RAG method to display based on presence, not success
-  // Prioritize RAG-as-tool if both are present, otherwise use whichever is present
-  const displayRAGTool = hasRAGTool
-  const displayNaiveRAG = hasNaiveRAG && !hasRAGTool
+  // Check if each RAG type actually retrieved documents
+  const hasNaiveRAGWithDocs = hasNaiveRAG && (
+    (metadata.rag_documents && metadata.rag_documents.length > 0) ||
+    (metadata.rag_retrieved_docs && metadata.rag_retrieved_docs > 0)
+  )
+  const hasRAGToolWithDocs = hasRAGTool && (
+    (metadata.rag_tool_documents && metadata.rag_tool_documents.length > 0) ||
+    (metadata.rag_tool_calls && metadata.rag_tool_calls > 0)
+  )
+
+  // Determine which RAG method to display based on actual results
+  // Prioritize showing whichever one actually returned documents
+  // If both have docs, prefer RAG-as-tool; if neither, show whichever has a status
+  const displayRAGTool = hasRAGToolWithDocs || (hasRAGTool && !hasNaiveRAGWithDocs)
+  const displayNaiveRAG = hasNaiveRAGWithDocs || (hasNaiveRAG && !hasRAGToolWithDocs)
 
   // Destructure all fields
   const { rag_status, rag_retrieved_docs, rag_sources, rag_avg_similarity, rag_error, rag_message, rag_documents } = metadata
