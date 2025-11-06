@@ -32,9 +32,9 @@ try:
     from src.api.endpoints import documents_router
     print("✓ Documents router imports successful")
 
-    # Test modular pipeline with RAG
-    from src.core.modular_pipeline import RAGModule
-    print("✓ RAGModule imports successful")
+    # Test modular pipeline with RAG modules
+    from src.core.modular_pipeline import NaiveRAGModule, RAGToolModule
+    print("✓ RAG modules (NaiveRAG and RAGTool) imports successful")
 
     print("\n" + "="*50)
     print("All imports successful!")
