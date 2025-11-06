@@ -40,8 +40,7 @@ export function ConfigurationPanel({ config, onConfigChange, className }: Config
   const [selectedPreset, setSelectedPreset] = useState<ConfigPreset>('baseline')
   const [validationErrors, setValidationErrors] = useState<string[]>([])
   const [validationSuccess, setValidationSuccess] = useState(false)
-  const validationTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-
+  const validationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // Load presets on mount
   useEffect(() => {
     loadPresets()
