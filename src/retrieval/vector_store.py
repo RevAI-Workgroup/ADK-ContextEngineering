@@ -35,7 +35,18 @@ class SearchResult:
     similarity: float
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary."""
+        """
+        Return a dictionary representation of the SearchResult.
+        
+        The dictionary includes the keys:
+        - `id`: the result identifier,
+        - `text`: the stored text content,
+        - `metadata`: the associated metadata mapping,
+        - `similarity`: the similarity score.
+        
+        Returns:
+            dict: A mapping with keys `id`, `text`, `metadata`, and `similarity`.
+        """
         return {
             "id": self.id,
             "text": self.text,
@@ -61,16 +72,15 @@ class VectorStore:
         allow_remote_embedding_detection: bool = False
     ):
         """
-        Initialize vector store.
-
-        Args:
-            persist_directory: Directory for ChromaDB persistence
-            collection_name: Name of the collection to use
-            embedding_function: Optional embedding function (defaults to sentence-transformers)
-            sample_limit: Default limit for sampling documents in get_stats (default: 100)
-            embedding_dimensions: Explicit embedding dimensions (avoids auto-detection)
-            allow_remote_embedding_detection: Allow auto-detection for remote embedding functions
-                (default: False to prevent expensive API calls)
+        Create and configure a persistent ChromaDB-backed vector store.
+        
+        Parameters:
+            persist_directory (str): Filesystem path used for ChromaDB persistence.
+            collection_name (str): Name of the ChromaDB collection to open or create.
+            embedding_function (Optional[Any]): Embedding function to use for vectors. If omitted, defaults to the sentence-transformers model `all-MiniLM-L6-v2`.
+            sample_limit (int): Default maximum number of documents to sample when computing stats.
+            embedding_dimensions (Optional[int]): Explicit embedding dimensionality to use instead of auto-detecting it.
+            allow_remote_embedding_detection (bool): If True, permit running remote embedding functions once to infer dimensionality; set to False to avoid potential API calls or costs.
         """
         self.persist_directory = Path(persist_directory)
         self.collection_name = collection_name
@@ -122,7 +132,12 @@ class VectorStore:
 
     @property
     def embedding_model_name(self) -> str:
-        """Get the embedding model name (lazy-loaded)."""
+        """
+        Retrieve the embedding model name used by this VectorStore.
+        
+        Returns:
+            embedding_model_name (str): The name of the embedding model.
+        """
         if self._embedding_model_name is None:
             with self._metadata_lock:
                 # Double-check pattern: another thread may have initialized while waiting
@@ -132,7 +147,12 @@ class VectorStore:
 
     @property
     def embedding_dimensions(self) -> int:
-        """Get the embedding dimensions (lazy-loaded)."""
+        """
+        Retrieve the number of dimensions used by the embedding model.
+        
+        Returns:
+            embedding_dimensions (int): The dimensionality of the embedding vectors.
+        """
         if self._embedding_dimensions is None:
             with self._metadata_lock:
                 # Double-check pattern: another thread may have initialized while waiting
@@ -206,16 +226,16 @@ class VectorStore:
         filter_metadata: Optional[Dict[str, Any]] = None
     ) -> List[SearchResult]:
         """
-        Search for similar documents.
-
-        Args:
-            query: Query text
-            top_k: Number of results to return
-            similarity_threshold: Minimum similarity score (0-1)
-            filter_metadata: Optional metadata filter
-
+        Finds documents in the collection most similar to the provided query.
+        
+        Parameters:
+            query (str): Query text to search for.
+            top_k (int): Maximum number of results to consider.
+            similarity_threshold (float): Minimum similarity score between 0 and 1; only results with similarity >= this threshold are returned.
+            filter_metadata (Optional[Dict[str, Any]]): Optional metadata filter expressed as a dictionary to restrict matching documents.
+        
         Returns:
-            List of SearchResult objects
+            List[SearchResult]: Matching SearchResult objects ordered by relevance; each contains `id`, `text`, `metadata`, and `similarity` (0–1).
         """
         try:
             results = self.collection.query(
@@ -254,10 +274,15 @@ class VectorStore:
 
     def delete_by_ids(self, ids: List[str]) -> None:
         """
-        Delete documents by IDs.
-
-        Args:
-            ids: List of document IDs to delete
+        Delete documents from the collection by their IDs.
+        
+        If `ids` is empty this method returns without performing any action.
+        
+        Parameters:
+            ids (List[str]): Document IDs to remove from the collection.
+        
+        Raises:
+            Exception: Propagates any exception raised by the underlying collection delete operation.
         """
         if not ids:
             return
@@ -271,13 +296,13 @@ class VectorStore:
 
     def delete_by_metadata(self, metadata_filter: Dict[str, Any]) -> None:
         """
-        Delete documents by metadata filter.
-
-        Args:
-            metadata_filter: Metadata filter for deletion. Must not be empty or falsy.
-
+        Remove documents from the collection that match the provided metadata filter.
+        
+        Parameters:
+            metadata_filter (Dict[str, Any]): A non-empty mapping of metadata field names to values used as a filter; documents with metadata matching these conditions will be deleted.
+        
         Raises:
-            ValueError: If metadata_filter is empty or falsy.
+            ValueError: If `metadata_filter` is empty or falsy.
         """
         if not metadata_filter:
             raise ValueError("metadata_filter must not be empty or falsy")
@@ -291,13 +316,13 @@ class VectorStore:
 
     def get_by_ids(self, ids: List[str]) -> List[SearchResult]:
         """
-        Get documents by IDs.
-
-        Args:
-            ids: List of document IDs
-
+        Retrieve documents that match the given IDs.
+        
+        Parameters:
+            ids (List[str]): Document IDs to retrieve.
+        
         Returns:
-            List of SearchResult objects
+            List[SearchResult]: A list of SearchResult instances for each found ID; each result has a similarity of 1.0 to indicate an exact match. If no IDs are provided or retrieval fails, returns an empty list.
         """
         if not ids:
             return []
@@ -322,13 +347,13 @@ class VectorStore:
 
     def get_all_documents(self, limit: Optional[int] = None) -> List[SearchResult]:
         """
-        Get all documents in the collection.
-
-        Args:
-            limit: Optional limit on number of documents to return
-
+        Return documents from the collection up to an optional limit.
+        
+        Parameters:
+            limit (Optional[int]): Maximum number of documents to return. If None, return all documents.
+        
         Returns:
-            List of SearchResult objects
+            List[SearchResult]: Retrieved documents as SearchResult objects. Each result's `similarity` is set to `1.0`.
         """
         try:
             # Get collection count
@@ -362,10 +387,10 @@ class VectorStore:
 
     def count(self) -> int:
         """
-        Get number of documents in collection.
-
+        Get the number of documents in the collection.
+        
         Returns:
-            Document count
+            int: Number of documents in the collection; returns 0 if an error occurs while retrieving the count.
         """
         try:
             return self.collection.count()
@@ -374,7 +399,13 @@ class VectorStore:
             return 0
 
     def clear(self) -> None:
-        """Clear all documents from the collection."""
+        """
+        Remove all documents by deleting and recreating the collection.
+        
+        Deletes the ChromaDB collection for this instance and recreates it using the same
+        embedding function and HNSW metadata setting (`"hnsw:space": "cosine"`). Any
+        exceptions raised by the underlying client are propagated.
+        """
         try:
             # Delete the collection and recreate it
             self.client.delete_collection(name=self.collection_name)
@@ -390,10 +421,15 @@ class VectorStore:
 
     def _is_local_embedding_function(self) -> bool:
         """
-        Check if the embedding function is local (safe to call without API costs).
-
+        Determine whether the configured embedding function appears to be local.
+        
+        Detection order:
+        - If the embedding function has an `is_local` attribute, its boolean value is used.
+        - Otherwise, instances of `SentenceTransformerEmbeddingFunction` are treated as local.
+        - If neither condition applies, the function is considered remote.
+        
         Returns:
-            True if the embedding function is local, False otherwise
+            True if the embedding function appears local, False otherwise.
         """
         # Check for explicit is_local attribute
         if hasattr(self.embedding_function, 'is_local'):
@@ -408,10 +444,12 @@ class VectorStore:
 
     def _extract_embedding_metadata(self) -> Tuple[str, int]:
         """
-        Extract embedding model name and dimensions from the embedding function.
-
+        Determine the embedding model name and vector dimensionality for the current embedding function.
+        
+        This inspects the configured embedding function and returns a best-effort pair of (model_name, dimensions). It prefers an explicitly provided dimensions value, then attempts to extract metadata from a SentenceTransformerEmbeddingFunction (attributes on the wrapper or its underlying model). If dimensions remain unknown and auto-detection is permitted (local embedding function or allow_remote_embedding_detection=True), it may call the embedding function on a short test input to infer the vector length. If detection fails, dimensions will be 0 and model_name may be "unknown" or a best-effort identifier derived from the function/class.
+        
         Returns:
-            Tuple of (model_name, dimensions)
+            Tuple[str, int]: (model_name, dimensions) where `model_name` is a human-readable identifier for the embedding model and `dimensions` is the embedding vector length (0 if unknown).
         """
         model_name = "unknown"
         dimensions = 0
@@ -514,13 +552,23 @@ class VectorStore:
 
     def get_stats(self, limit: Optional[int] = None) -> Dict[str, Any]:
         """
-        Get vector store statistics.
-
-        Args:
-            limit: Optional limit for sampling documents (defaults to self.sample_limit)
-
+        Return statistics and metadata about the vector store.
+        
+        Parameters:
+            limit (Optional[int]): Maximum number of documents to sample for source statistics; if omitted uses the instance's sample_limit.
+        
         Returns:
-            Dictionary with store statistics
+            Dict[str, Any]: A dictionary containing:
+                - total_documents (int): Total number of documents in the collection.
+                - unique_sources (int): Count of distinct `source` values found in the sampled documents.
+                - sources (List[str]): List of distinct `source` values discovered.
+                - collection_name (str): Name of the Chroma collection.
+                - persist_directory (str): Filesystem path used for persistence.
+                - storage_size_mb (float): Estimated storage size of the persist directory in megabytes.
+                - embedding_model (str): Name or identifier of the embedding model.
+                - embedding_dimensions (int): Dimensionality of the embedding vectors.
+                - sample_limit_used (int): The sample limit actually used for collecting statistics.
+            On failure returns a dictionary with `total_documents` set to 0 and an `error` string describing the failure.
         """
         try:
             count = self.count()
@@ -560,10 +608,10 @@ class VectorStore:
 
     def _estimate_storage_size(self) -> float:
         """
-        Estimate storage size in MB.
-
+        Estimate the total size of the persistence directory in megabytes.
+        
         Returns:
-            Estimated size in megabytes
+            storage_size_mb (float): Total size of files under the configured persist directory in megabytes; returns 0.0 if estimation fails.
         """
         try:
             total_size = 0
@@ -613,20 +661,17 @@ def get_vector_store(
     allow_remote_embedding_detection: bool = False
 ) -> VectorStore:
     """
-    Get global vector store instance (singleton pattern).
-
-    Args:
-        persist_directory: Directory for ChromaDB persistence
-        collection_name: Name of the collection
-        embedding_function: Optional embedding function
-        embedding_dimensions: Explicit embedding dimensions (avoids auto-detection)
-        allow_remote_embedding_detection: Allow auto-detection for remote embedding functions
-
+    Return the global VectorStore singleton, creating and tracking a new instance if none exists.
+    
+    Parameters:
+        embedding_dimensions (Optional[int]): Explicit embedding vector dimensionality; when provided, auto-detection is skipped.
+        allow_remote_embedding_detection (bool): If True, allow attempting embedding-dimension detection for remote/unknown embedding functions.
+    
     Returns:
-        Global VectorStore instance
-
+        VectorStore: The global VectorStore instance managed as a singleton.
+    
     Raises:
-        ValueError: If called with different parameters than the existing instance
+        ValueError: If a global instance already exists and the requested `persist_directory` or `collection_name` differ from the tracked values. Call `reset_vector_store()` or instantiate `VectorStore` directly to use different parameters.
     """
     global _global_vector_store, _global_vector_store_params
 
@@ -704,7 +749,12 @@ def get_vector_store(
 
 
 def reset_vector_store() -> None:
-    """Reset the global vector store (useful for testing)."""
+    """
+    Clear the module's cached global VectorStore instance and its stored parameters.
+    
+    This resets the internal singleton state so subsequent calls to get_vector_store()
+    will create a new VectorStore.
+    """
     global _global_vector_store, _global_vector_store_params
     _global_vector_store = None
     _global_vector_store_params = None

@@ -32,11 +32,11 @@ VERSION = "2.0.0"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
-    Lifespan context manager for FastAPI app.
+    Manage application startup and shutdown for the FastAPI app.
     
-    Handles initialization and cleanup of singleton instances:
-    - ADK Agent Wrapper
-    - Metrics Collector
+    On startup, attach shared singleton instances (ADKAgentWrapper and MetricsCollector) to app.state so they are available throughout the application. On shutdown, perform any necessary cleanup of application resources.
+    Parameters:
+        app (FastAPI): The FastAPI application whose lifespan is being managed; shared singletons are stored on app.state.
     """
     # Startup: Initialize shared instances
     logger.info("Initializing application dependencies...")
@@ -75,7 +75,17 @@ app.add_middleware(
 # Health check endpoint
 @app.get("/")
 async def root():
-    """Root endpoint - API health check."""
+    """
+    Provide service health and metadata for the API root endpoint.
+    
+    Returns:
+        dict: Health payload containing:
+            status (str): Service health status, e.g., "healthy".
+            service (str): Human-readable service name.
+            version (str): API version string.
+            phase (str): Current deployment or development phase description.
+            timestamp (str): UTC ISO 8601 timestamp of the response.
+    """
     return {
         "status": "healthy",
         "service": "Context Engineering Sandbox API",
@@ -122,4 +132,3 @@ async def global_exception_handler(request, exc):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
-

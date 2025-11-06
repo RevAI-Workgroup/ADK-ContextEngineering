@@ -13,32 +13,17 @@ logger = logging.getLogger(__name__)
 
 def search_knowledge_base(query: str, top_k: int = 5) -> str:
     """
-    Search the knowledge base for relevant documents and information.
-
-    IMPORTANT: Use this tool proactively whenever:
-    - A user asks ANY question that isn't basic small talk
-    - You need to provide accurate, factual information
-    - The query could benefit from documentation, examples, or data
-    - You're uncertain about specific details or facts
-    - The user asks "what", "how", "why", "explain", or "tell me about" questions
-
-    DO NOT assume the knowledge base is empty - always check it first.
-    DO NOT say "I don't have information" without trying this tool first.
-    Even if the query seems general, there might be relevant documents.
-
-    Examples of when to use:
-    - "What is X?" → Search for X
-    - "How does Y work?" → Search for Y
-    - "Tell me about Z" → Search for Z
-    - "Explain A to me" → Search for A
-    - Any technical question → Search for related terms
-
-    Args:
-        query: The search query describing what information you need
-        top_k: Number of documents to retrieve (default: 5)
-
+    Search the knowledge base for documents relevant to the given query and return a formatted string suitable for an LLM.
+    
+    Parameters:
+        query (str): The search query describing the information to find.
+        top_k (int): Maximum number of documents to retrieve (default 5).
+    
     Returns:
-        String containing the retrieved documents and their sources
+        str: A formatted summary of found documents including source, relevance percentage, and content;
+             or a user-facing message if the knowledge base is empty ("The knowledge base is empty. No documents have been uploaded yet."),
+             if no relevant documents are found ("No relevant documents found in the knowledge base for query: '<query>'"),
+             or an error message prefixed with "Error searching knowledge base: " if an exception occurs.
     """
     try:
         from src.retrieval.vector_store import get_vector_store

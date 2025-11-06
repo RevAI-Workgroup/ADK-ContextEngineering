@@ -15,7 +15,15 @@ project_root = Path(__file__).parent.parent.absolute()
 sys.path.insert(0, str(project_root))
 
 def initialize_vector_store():
-    """Initialize vector store and ingest test documents."""
+    """
+    Initialize the project's ChromaDB vector store and ingest test documents from data/knowledge_base.
+    
+    Initializes the ChromaDB vector store (via src.retrieval.vector_store.get_vector_store), and if the store is empty:
+    loads .txt and .md files from data/knowledge_base, chunks each document using a fixed strategy (chunk_size=512, chunk_overlap=50),
+    adds all chunks to the vector store, and prints verification statistics and quick API usage hints.
+    
+    Exits the process with status 1 on ImportError (missing dependencies) or on other unexpected errors.
+    """
     print("="*60)
     print("Initializing Vector Store for Phase 3 RAG")
     print("="*60)

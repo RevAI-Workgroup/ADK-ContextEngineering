@@ -38,7 +38,11 @@ class ADKAgentWrapper:
     """
     
     def __init__(self):
-        """Initialize the ADK agent wrapper with model caching."""
+        """
+        Initialize the ADKAgentWrapper, preparing agents, runners, caches, and session storage.
+        
+        Sets up a default agent and runner for backward compatibility, initializes in-memory session storage and per-model caches for agents and runners, and attempts to load runtime configuration used to influence runner/agent construction. Logs a warning if configuration cannot be loaded.
+        """
         # Default agent and runner (for backward compatibility)
         self.agent = root_agent
         self.session_service = InMemorySessionService()
@@ -69,13 +73,15 @@ class ADKAgentWrapper:
     
     def _get_config_hash(self, config: Optional[ContextEngineeringConfig]) -> str:
         """
-        Generate a hash of the config to use as part of cache key.
-
-        Args:
-            config: Context engineering configuration
-
+        Compute a short cache key representing the given context engineering configuration.
+        
+        If `config` is provided, the returned value is an 8-character hexadecimal string derived from the configuration's enabled techniques. If `config` is None, returns "no_config".
+        
+        Parameters:
+            config (Optional[ContextEngineeringConfig]): Configuration whose enabled techniques are used to derive the hash.
+        
         Returns:
-            Hash string representing the config state
+            str: An 8-character hex string representing the config's enabled techniques, or `"no_config"` when `config` is None.
         """
         if not config:
             logger.debug("Config is None, using 'no_config' hash")
@@ -90,13 +96,13 @@ class ADKAgentWrapper:
 
     def _build_tools_list(self, config: Optional[ContextEngineeringConfig]) -> List:
         """
-        Build list of tools based on configuration.
-
-        Args:
-            config: Context engineering configuration
-
+        Return the list of tools enabled for an agent according to the provided configuration.
+        
+        Parameters:
+            config (Optional[ContextEngineeringConfig]): Configuration that may enable additional tools (for example, RAG). If None, only the base tools are returned.
+        
         Returns:
-            List of tool functions to provide to the agent
+            List: A list of tool callables that should be provided to the agent.
         """
         # Start with base tools
         tools = list(TOOLS)
@@ -225,17 +231,25 @@ class ADKAgentWrapper:
         config: Optional[ContextEngineeringConfig] = None
     ) -> Dict[str, Any]:
         """
-        Process a message through the ADK agent (synchronous).
+        Process a user message through the ADK agent and return a structured response with optional pipeline enrichment and metrics.
         
-        Args:
-            message: User's message
-            session_id: Optional session ID for conversation tracking
-            include_thinking: Whether to include thinking steps
-            model: Optional model name to use (e.g., "qwen3:4b", "llama2:7b")
-            config: Optional context engineering configuration
-            
+        This method optionally runs a ContextPipeline to enrich the input, selects or creates a Runner for the requested model and configuration, executes the agent, collects streamed events, extracts the final textual response, records any tool calls and their results, and persists the interaction in the in-memory session store.
+        
+        Parameters:
+            message (str): The user's input message.
+            session_id (Optional[str]): Conversation session identifier; if omitted a short UUID-based session id is created.
+            include_thinking (bool): If True, include thinking steps in the returned data (may be None when disabled).
+            model (Optional[str]): Optional model name to use; "default" is used when omitted.
+            config (Optional[ContextEngineeringConfig]): Optional context-engineering configuration that can enrich input and enable RAG tools.
+        
         Returns:
-            Dictionary containing response, thinking steps, tool calls, and metrics
+            Dict[str, Any]: A dictionary containing:
+                - response (str): The agent's final textual response (empty string if none extracted).
+                - thinking_steps (Optional[List[str]]): Collected thinking steps when enabled; `None` if include_thinking is False.
+                - tool_calls (Optional[List[Dict]]): List of detected tool invocations with name, parameters, timestamp and optional result; `None` if none detected.
+                - model (str): The resolved model identifier used for the request ("default" when not specified).
+                - metrics (Dict): Timing and contextual metrics including `latency_ms`, `timestamp`, `session_id`, `pipeline_metrics` (if any), and `enabled_techniques`.
+                - pipeline_metadata (Optional[Dict]): Metadata produced by the context pipeline when used.
         """
         logger.info(f"Processing message with model '{model or 'default'}': {message[:50]}...")
         start_time = time.time()
@@ -480,21 +494,24 @@ class ADKAgentWrapper:
         config: Optional[ContextEngineeringConfig] = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
-        Process a message through the ADK agent with streaming updates.
+        Stream a user's message through the ADK agent and yield incremental events as the agent processes it.
         
-        Yields events as the agent processes the message:
-        - thinking: Agent thinking steps
-        - tool_call: Tool invocation
-        - response: Final response
+        This generator yields event dictionaries representing intermediate and final updates produced while handling the message: thinking updates, tool invocation notices, final response data, and error events. When a context engineering config is provided, the message is preprocessed and pipeline metrics and metadata may be included in the final response.
         
-        Args:
-            message: User's message
-            session_id: Optional session ID
-            model: Optional model name to use (e.g., "qwen3:4b", "llama2:7b")
-            config: Optional context engineering configuration
-            
-        Yields:
-            Event dictionaries with type and data
+        Parameters:
+            message (str): The user's raw message.
+            session_id (Optional[str]): Optional session identifier; a new session id is generated if not provided.
+            model (Optional[str]): Optional model name to use (e.g., "qwen3:4b", "llama2:7b"); "default" is used if omitted.
+            config (Optional[ContextEngineeringConfig]): Optional context engineering configuration that may enrich the message, enable additional tools, and produce pipeline metrics/metadata.
+        
+        Returns:
+            AsyncGenerator[Dict[str, Any], None]: Yields event dictionaries with the shape:
+              - {"type": "thinking", "data": {"message": <status text>}}
+              - {"type": "tool_call", "data": {"message": <tool invocation summary>}}
+              - {"type": "response", "data": <final response object>} where the final response includes keys:
+                  "response" (str), "thinking_steps" (list or None), "tool_calls" (list), "model" (str),
+                  "pipeline_metrics" (dict or None), "enabled_techniques" (list), and optional "pipeline_metadata"
+              - {"type": "error", "data": {"error": <error message>}} on failures
         """
         logger.info(f"Processing message with streaming (model: '{model or 'default'}'): {message[:50]}...")
         
@@ -640,14 +657,17 @@ class ADKAgentWrapper:
     
     def _parse_agent_output(self, output: str, include_thinking: bool) -> Dict[str, Any]:
         """
-        Parse ADK agent output to extract response, thinking, and tool calls.
+        Parse agent output into structured response, thinking steps, and detected tool calls.
         
-        Args:
-            output: Raw agent output
-            include_thinking: Whether to include thinking steps
-            
+        Parameters:
+            output (str): The raw multiline string produced by the agent.
+            include_thinking (bool): Whether to include parsed thinking steps; if False, `thinking_steps` will be None.
+        
         Returns:
-            Parsed response data
+            dict: A dictionary with keys:
+                - `response` (str): The consolidated response text (last substantive lines).
+                - `thinking_steps` (List[str] or None): Extracted thinking blocks in order, or None when `include_thinking` is False.
+                - `tool_calls` (List[dict]): Detected tool call entries, each with `name` and `description`.
         """
         response_data = {
             "response": "",
@@ -714,13 +734,13 @@ class ADKAgentWrapper:
     
     def get_available_tools(self, config: Optional[ContextEngineeringConfig] = None) -> List[Dict[str, Any]]:
         """
-        Get list of available tools from the ADK agent.
-
-        Args:
-            config: Optional configuration to determine which tools are available
-
+        Return the list of tools the agent can use, optionally including RAG tooling based on configuration.
+        
+        Parameters:
+            config (Optional[ContextEngineeringConfig]): If provided and its `rag_tool_enabled` is true, include the `search_knowledge_base` tool and its parameters.
+        
         Returns:
-            List of tool information dictionaries
+            List[Dict[str, Any]]: A list of tool descriptor dictionaries, each containing `name`, `description`, and `parameters` describing the tool's inputs.
         """
         # Base tools that are always available
         tools = [
@@ -788,17 +808,16 @@ class ADKAgentWrapper:
     
     def get_tool_info(self, tool_name: str) -> Optional[Dict[str, Any]]:
         """
-        Get detailed information about a specific tool.
+        Return metadata for a named tool if it exists.
         
-        Args:
-            tool_name: Name of the tool
-            
+        Parameters:
+            tool_name (str): The tool's name to look up.
+        
         Returns:
-            Tool information dictionary or None if not found
+            dict: The tool's information dictionary if found, `None` otherwise.
         """
         tools = self.get_available_tools()
         for tool in tools:
             if tool["name"] == tool_name:
                 return tool
         return None
-

@@ -11,6 +11,14 @@ interface ChatMessageProps {
   message: Message
 }
 
+/**
+ * Render a chat message with avatar, content, timestamp, and contextual details.
+ *
+ * Renders a user-styled or assistant-styled message based on message.role. For assistant messages, conditionally shows a model badge when `message.model` exists, RAG feedback when `pipelineMetadata.rag_status === 'success'` and `rag_retrieved_docs > 0`, tool output when `message.toolCalls` is non-empty, and thinking steps when `message.thinking` is non-empty.
+ *
+ * @param message - The message to render, including role, content, timestamp, model, pipelineMetadata, toolCalls, and thinking steps.
+ * @returns The rendered chat message element.
+ */
 export function ChatMessage({ message }: ChatMessageProps) {
   const isUser = message.role === 'user'
 
@@ -74,4 +82,3 @@ export function ChatMessage({ message }: ChatMessageProps) {
     </div>
   )
 }
-

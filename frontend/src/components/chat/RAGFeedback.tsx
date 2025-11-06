@@ -9,6 +9,15 @@ interface RAGFeedbackProps {
   metadata: RAGMetadata
 }
 
+/**
+ * Renders a collapsible feedback card that summarizes Retrieval-Augmented Generation (RAG) metadata.
+ *
+ * The card displays either RAG-as-tool or naive RAG information (preferring RAG-as-tool when both are present),
+ * shows status, counts, similarity metrics, retrieved documents and sources, and presents empty/error states.
+ *
+ * @param metadata - RAG metadata containing fields for naive RAG (e.g., `rag_status`, `rag_documents`, `rag_sources`, `rag_avg_similarity`, `rag_error`, `rag_message`) and RAG-as-tool (e.g., `rag_tool_status`, `rag_tool_name`, `rag_tool_calls`, `rag_tool_documents`).
+ * @returns The RAG feedback React element, or `null` when no RAG metadata is available.
+ */
 export function RAGFeedback({ metadata }: RAGFeedbackProps) {
   // Start expanded by default to show RAG information
   const [isExpanded, setIsExpanded] = useState(true)

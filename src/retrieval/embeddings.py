@@ -29,11 +29,14 @@ class EmbeddingService:
         cache_size: int = 1000
     ):
         """
-        Initialize embedding service.
-
-        Args:
-            model_name: Name of the sentence-transformer model
-            cache_size: Size of the embedding cache
+        Create an EmbeddingService by loading the specified SentenceTransformer model and initializing an LRU embedding cache.
+        
+        Parameters:
+            model_name (str): Sentence-transformers model identifier to load (default "sentence-transformers/all-MiniLM-L6-v2").
+            cache_size (int): Maximum number of embeddings to retain in the LRU cache.
+        
+        Raises:
+            Exception: If the SentenceTransformer model fails to load.
         """
         self.model_name = model_name
         self.cache_size = cache_size
@@ -57,13 +60,15 @@ class EmbeddingService:
 
     def embed_text(self, text: str) -> List[float]:
         """
-        Generate embedding for a single text.
-
+        Generates an embedding vector for the given text.
+        
+        Returns a zero vector when the input is empty or whitespace. Uses the service's LRU cache and updates cache hit/miss counters; on a successful cache hit returns the cached vector. On encoding failure returns a zero vector.
+        
         Args:
-            text: Text to embed
-
+            text (str): The input text to embed.
+        
         Returns:
-            Embedding vector as list of floats
+            List[float]: The embedding vector (length equals the service's embedding dimension); `0.0` values indicate an empty input or an encoding failure.
         """
         if not text or not text.strip():
             logger.warning("Empty text provided for embedding")
@@ -98,14 +103,16 @@ class EmbeddingService:
 
     def embed_batch(self, texts: List[str], batch_size: int = 32) -> List[List[float]]:
         """
-        Generate embeddings for multiple texts efficiently.
-
-        Args:
-            texts: List of texts to embed
-            batch_size: Batch size for encoding
-
+        Generate embeddings for a list of texts, reusing cached embeddings and encoding uncached texts in batches.
+        
+        Cached embeddings are returned in-place and their LRU position is updated; uncached texts are encoded in batches of size `batch_size` and added to the cache. If batch encoding fails, embeddings for the failed items are replaced with zero vectors of the service's embedding dimension.
+        
+        Parameters:
+            texts (List[str]): Input texts to embed; order is preserved in the result.
+            batch_size (int): Maximum number of texts to encode per model call.
+        
         Returns:
-            List of embedding vectors
+            List[List[float]]: Embedding vectors aligned with the input `texts`; each entry is a list of floats.
         """
         if not texts:
             return []
@@ -170,10 +177,15 @@ class EmbeddingService:
 
     def get_cache_stats(self) -> dict:
         """
-        Get cache statistics.
-
+        Return statistics about the embedding cache.
+        
         Returns:
-            Dictionary with cache stats
+            dict: Mapping with the following keys:
+                - cache_size (int): Current number of entries in the embedding cache.
+                - max_cache_size (int): Configured maximum cache capacity.
+                - cache_hits (int): Number of cache hits served.
+                - cache_misses (int): Number of cache misses.
+                - hit_rate (float): Ratio of hits to total requests (value between 0 and 1).
         """
         total_requests = self._cache_hits + self._cache_misses
         hit_rate = (
@@ -195,15 +207,17 @@ class EmbeddingService:
         metric: str = "cosine"
     ) -> float:
         """
-        Compute similarity between two texts.
-
-        Args:
-            text1: First text
-            text2: Second text
-            metric: Similarity metric ("cosine" or "dot")
-
+        Compute a similarity score between two texts using either cosine similarity or dot product.
+        
+        Parameters:
+            metric (str): Similarity metric to use; either "cosine" (normalized cosine similarity, range -1 to 1)
+                or "dot" (raw dot product, unbounded). Defaults to "cosine".
+        
         Returns:
-            Similarity score (-1 to 1 for cosine, unbounded for dot)
+            float: Similarity score (for "cosine", -1.0 to 1.0; for "dot", an unbounded float).
+        
+        Raises:
+            ValueError: If `metric` is not "cosine" or "dot".
         """
         emb1 = np.array(self.embed_text(text1))
         emb2 = np.array(self.embed_text(text2))
@@ -224,10 +238,14 @@ class EmbeddingService:
 
     def get_model_info(self) -> dict:
         """
-        Get information about the embedding model.
-
+        Return metadata and runtime statistics for the embedding model.
+        
         Returns:
-            Dictionary with model information
+            info (dict): Dictionary with the following keys:
+                - model_name (str): The model identifier used for embeddings.
+                - embedding_dimension (int): Size of the output embedding vectors.
+                - max_sequence_length (int): Maximum token/sequence length the model accepts.
+                - cache_stats (dict): Cache statistics containing `cache_size`, `max_cache_size`, `cache_hits`, `cache_misses`, and `hit_rate`.
         """
         return {
             "model_name": self.model_name,
@@ -238,10 +256,9 @@ class EmbeddingService:
 
     def cleanup(self) -> None:
         """
-        Clean up resources used by this embedding service.
+        Release internal resources used by the embedding service.
         
-        Releases the model and clears caches. Should be called when
-        the service is being evicted from the cache.
+        Clears the in-memory embedding cache and clears the model reference to allow garbage collection. Exceptions raised during cleanup are caught and logged; this method does not propagate errors.
         """
         try:
             # Clear embedding cache
@@ -268,19 +285,16 @@ def get_embedding_service(
     model_name: str = "sentence-transformers/all-MiniLM-L6-v2"
 ) -> EmbeddingService:
     """
-    Get embedding service instance (singleton per model name).
+    Return the EmbeddingService singleton for the given model name.
     
-    Maintains a separate singleton instance for each model name to prevent
-    stale references. Thread-safe with bounded LRU cache eviction.
+    Maintains a per-model singleton registry with an LRU-bounded capacity; when capacity is reached,
+    the least-recently-used service is evicted and its cleanup method is invoked.
     
-    When the cache is at capacity, the least-recently-used model is evicted
-    and its resources are cleaned up before creating a new instance.
-
-    Args:
-        model_name: Name of the embedding model
-
+    Parameters:
+        model_name (str): Name or identifier of the embedding model to retrieve.
+    
     Returns:
-        EmbeddingService instance for the requested model (singleton per model)
+        EmbeddingService: The cached or newly created EmbeddingService instance for the specified model.
     """
     global _embedding_services, _services_lock
     
@@ -323,13 +337,12 @@ def get_embedding_service(
 
 def reset_embedding_service(model_name: Optional[str] = None) -> None:
     """
-    Reset embedding service instance(s) (useful for testing).
+    Reset cached EmbeddingService instances, optionally for a single model.
     
-    Thread-safe operation that cleans up resources before removing instances.
+    Performs cleanup on the affected instance(s) and removes them from the module-level cache in a thread-safe manner.
     
-    Args:
-        model_name: If provided, reset only this model's instance.
-                    If None, reset all instances.
+    Parameters:
+        model_name (Optional[str]): If provided, reset only the service for this model name; if None, reset all services.
     """
     global _embedding_services, _services_lock
     

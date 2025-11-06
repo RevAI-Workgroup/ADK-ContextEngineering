@@ -83,7 +83,11 @@ class TestNaiveRAGModule:
         assert not module.is_enabled()
     
     def test_rag_module_configuration(self):
-        """Test configuring RAG module."""
+        """
+        Verify that NaiveRAGModule.configure applies provided configuration values.
+        
+        Asserts that `chunk_size`, `top_k`, and `similarity_threshold` on the module are set to the values supplied in the configuration dictionary.
+        """
         module = NaiveRAGModule()
         config = {
             "chunk_size": 1024,
@@ -311,4 +315,3 @@ class TestAllStubModules:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
-

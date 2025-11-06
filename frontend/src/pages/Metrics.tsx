@@ -12,6 +12,13 @@ import { RefreshCw, TrendingUp, BarChart3, Filter } from 'lucide-react'
 import { isMetricBetterWhenHigher, formatTimestamp, RunComparison, RunRecord } from '../types/run.types'
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } from 'recharts'
 
+/**
+ * Render the Run Comparison view for filtering, selecting, and comparing experiment runs.
+ *
+ * Displays controls to filter runs by query text, enabled techniques, and date range; lets the user select runs (select all / clear); shows loading and error states; provides a refresh action; and renders comparison charts and a metrics summary when runs are selected.
+ *
+ * @returns The rendered Run Comparison UI
+ */
 export function Metrics() {
   const { 
     loading, 
@@ -289,6 +296,12 @@ interface RunComparisonChartsProps {
   runComparison: RunComparison | null
 }
 
+/**
+ * Render charts and a metrics summary comparing multiple runs.
+ *
+ * @param runComparison - Object containing runs and their aggregated metric comparisons; if `null` or contains no runs the component renders nothing.
+ * @returns A React element containing comparison charts (latency, token usage, relevance, accuracy), a technique-impact bar chart, and a metrics summary table, or `null` when `runComparison` has no runs.
+ */
 function RunComparisonCharts({ runComparison }: RunComparisonChartsProps) {
   if (!runComparison || !runComparison.runs || runComparison.runs.length === 0) {
     return null
@@ -538,4 +551,3 @@ function RunComparisonCharts({ runComparison }: RunComparisonChartsProps) {
     </div>
   )
 }
-

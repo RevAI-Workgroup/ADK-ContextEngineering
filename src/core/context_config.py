@@ -137,22 +137,42 @@ class ContextEngineeringConfig:
     
     @property
     def naive_rag_enabled(self) -> bool:
-        """Check if Naive RAG is enabled."""
+        """
+        Indicates whether the Naive RAG module is enabled.
+        
+        Returns:
+            True if Naive RAG is enabled, False otherwise.
+        """
         return self.naive_rag.enabled
 
     @property
     def rag_tool_enabled(self) -> bool:
-        """Check if RAG-as-tool is enabled."""
+        """
+        Return whether the RAG-as-tool module is enabled.
+        
+        Returns:
+            True if the RAG-as-tool configuration is enabled, False otherwise.
+        """
         return self.rag_tool.enabled
 
     @property
     def rag_enabled(self) -> bool:
-        """Check if any RAG variant is enabled (backward compatibility)."""
+        """
+        Determine whether any retrieval-augmented generation variant is enabled.
+        
+        Returns:
+            `true` if either naive RAG or RAG-as-tool is enabled, `false` otherwise.
+        """
         return self.naive_rag.enabled or self.rag_tool.enabled
     
     @property
     def compression_enabled(self) -> bool:
-        """Check if compression is enabled."""
+        """
+        Indicates whether the context compression module is enabled.
+        
+        Returns:
+            True if compression is enabled, False otherwise.
+        """
         return self.compression.enabled
     
     @property
@@ -186,26 +206,26 @@ class ContextEngineeringConfig:
     
     def to_json(self) -> str:
         """
-        Convert configuration to JSON string.
+        Serialize the configuration to a pretty-printed JSON string.
         
         Returns:
-            JSON string representation of the configuration
+            A JSON-formatted string representing the configuration.
         """
         return json.dumps(self.to_dict(), indent=2)
     
     @staticmethod
     def _filter_dict_for_dataclass(dataclass_type: type, data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Filter dictionary to only include valid dataclass field names.
+        Filter a mapping to the keys that correspond to the fields of a given dataclass.
         
-        This allows forward-compatible deserialization by ignoring unknown keys.
+        Unknown keys are ignored to allow forward-compatible deserialization.
         
-        Args:
-            dataclass_type: The dataclass type to filter for
-            data: Dictionary to filter
-            
+        Parameters:
+            dataclass_type: The dataclass type whose field names should be preserved.
+            data: The input mapping to filter.
+        
         Returns:
-            Filtered dictionary containing only valid field names
+            A dictionary containing only the items from `data` whose keys match the dataclass's field names.
         """
         if not data:
             return {}
@@ -219,15 +239,15 @@ class ContextEngineeringConfig:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ContextEngineeringConfig":
         """
-        Create configuration from dictionary.
+        Construct a ContextEngineeringConfig from a dictionary, with forward- and backward-compatible handling of nested sections.
         
-        Unknown keys in nested config dictionaries are ignored for forward compatibility.
+        This classmethod builds nested dataclass instances for each sub-configuration, ignoring unknown keys in those nested dictionaries. It accepts legacy input where the old `'rag'` key may be present in place of the new `'naive_rag'` key.
         
-        Args:
-            data: Dictionary containing configuration data
-            
+        Parameters:
+            data (Dict[str, Any]): Mapping with top-level keys for components (e.g., 'naive_rag' or legacy 'rag', 'rag_tool', 'compression', 'reranking', 'caching', 'hybrid_search', 'memory', 'model', 'max_context_tokens', 'temperature').
+        
         Returns:
-            ContextEngineeringConfig instance
+            ContextEngineeringConfig: A fully populated configuration instance constructed from the provided data, using default values for any missing fields.
         """
         # Extract nested configurations
         # Support both old 'rag' and new 'naive_rag' for backward compatibility
@@ -315,10 +335,12 @@ class ContextEngineeringConfig:
     
     def validate(self) -> List[str]:
         """
-        Validate configuration and return list of validation errors.
+        Validate the entire ContextEngineeringConfig and collect configuration errors.
+        
+        Performs checks across Naive RAG, RAG-as-tool, hybrid search, caching, memory, and general settings and returns a list of human-readable error messages describing any invalid fields (empty list if the configuration is valid).
         
         Returns:
-            List of validation error messages (empty if valid)
+            List[str]: Validation error messages (empty if valid)
         """
         errors = []
 
@@ -419,10 +441,12 @@ class ContextEngineeringConfig:
     
     def get_enabled_techniques(self) -> List[str]:
         """
-        Get list of enabled technique names.
+        Return the list of enabled context-engineering technique names.
         
         Returns:
-            List of enabled technique names
+            List[str]: A list of enabled technique identifiers chosen from:
+                "naive_rag", "rag_tool", "compression", "reranking",
+                "caching", "hybrid_search", "memory".
         """
         techniques = []
         if self.naive_rag_enabled:
@@ -482,4 +506,3 @@ def get_preset_names() -> List[str]:
         List of preset names
     """
     return [preset.value for preset in ConfigPreset]
-

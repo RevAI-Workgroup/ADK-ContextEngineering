@@ -16,6 +16,17 @@ interface ChatInterfaceProps {
   useRealtime?: boolean
 }
 
+/**
+ * Renders the chat interface used for sending messages, displaying assistant responses, and uploading documents.
+ *
+ * Supports both real-time WebSocket streaming (thinking steps and tool calls streamed incrementally) and
+ * synchronous HTTP requests. Shows an error banner when errors occur, displays conversation messages,
+ * an "Agent is thinking..." indicator during processing, and a file upload flow that accepts `.txt` and `.md`
+ * files and acknowledges successful uploads in the chat.
+ *
+ * @param useRealtime - If true, attempt real-time streaming over WebSocket; otherwise use synchronous HTTP requests.
+ * @returns A JSX element containing the chat UI (messages list, error banner, and input area).
+ */
 export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
   const { messages, setMessages, isProcessing, setIsProcessing, errorMessage, setErrorMessage, selectedModel, config } = useChatContext()
   const [uploadingFile, setUploadingFile] = useState(false)
@@ -323,4 +334,3 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
     </div>
   )
 }
-

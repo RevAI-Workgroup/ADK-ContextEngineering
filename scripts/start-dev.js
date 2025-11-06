@@ -31,6 +31,16 @@ function log(prefix, message, color = colors.reset) {
   console.log(`${color}${colors.bright}[${prefix}]${colors.reset} ${message}`);
 }
 
+/**
+ * Start the FastAPI development server for the project.
+ *
+ * Spawns a platform-aware child process that activates the project's virtual environment,
+ * ensures PYTHONPATH includes the project root, runs uvicorn with reload enabled,
+ * and attaches logging handlers for the process output. Resolves when the server
+ * has likely started; rejects if the process reports an error or exits prematurely.
+ *
+ * @returns {Promise<import('child_process').ChildProcess>} The spawned backend child process once startup is confirmed.
+ */
 function startBackend() {
   return new Promise((resolve, reject) => {
     log('BACKEND', 'Starting FastAPI server...', colors.blue);
@@ -200,7 +210,16 @@ process.on('SIGINT', cleanup);
 process.on('SIGTERM', cleanup);
 process.on('exit', cleanup);
 
-// Main execution
+/**
+ * Start the development environment: validate prerequisites, optionally initialize the vector store, and launch the backend and frontend dev servers.
+ *
+ * Performs these actions:
+ * - Verifies Python virtual environment and workspace Node dependencies, exiting on missing prerequisites.
+ * - Warns if frontend has its own node_modules (possible workspace misconfiguration).
+ * - Attempts a non-critical ChromaDB/vector-store initialization and logs guidance on failure.
+ * - Starts the FastAPI backend then the Vite frontend, prints access URLs, and prompts to use Ctrl+C to stop.
+ * - On startup failure, logs the error, invokes cleanup, and exits the process.
+ */
 async function main() {
   console.log(`\n${colors.cyan}${colors.bright}╔═══════════════════════════════════════════╗${colors.reset}`);
   console.log(`${colors.cyan}${colors.bright}║   ADK Context Engineering - Dev Server   ║${colors.reset}`);
@@ -302,4 +321,3 @@ async function main() {
 }
 
 main();
-

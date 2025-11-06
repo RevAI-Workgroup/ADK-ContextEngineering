@@ -99,10 +99,16 @@ async def chat(
     metrics_collector: MetricsCollector = Depends(get_metrics_collector)
 ):
     """
-    Send a message to the ADK agent and get a response.
+    Handle a chat request by processing the provided message with the ADK agent and returning a ChatResponse.
     
-    This endpoint provides synchronous chat interaction.
-    For real-time streaming, use the WebSocket endpoint /api/chat/ws
+    Parameters:
+        message (ChatMessage): The incoming chat payload, which may include session_id, model override, thinking flag, and an optional context `config` dict.
+    
+    Returns:
+        ChatResponse: The agent's response including response text, thinking steps, tool calls, collected metrics, timestamp, model, and optional pipeline metadata and pipeline_metrics.
+    
+    Raises:
+        HTTPException: Raised with status 400 when `message.config` is invalid or fails validation; raised with status 500 for internal processing errors.
     """
     logger.debug(
         "Received chat message for model %s", message.model or "default"
@@ -409,13 +415,15 @@ async def get_tools(
     adk_wrapper: ADKAgentWrapper = Depends(get_adk_wrapper)
 ):
     """
-    Get list of available tools for the ADK agent based on configuration.
-
-    Returns information about each tool including name, description,
-    and parameters. Tools list may vary based on enabled configuration.
-
-    Args:
-        config: Optional configuration dict to determine which tools are available
+    Return the list of tools available to the ADK agent given an optional configuration.
+    
+    If `config` is provided and valid, it is used to determine which tools are exposed; otherwise the default tool set is returned.
+    
+    Parameters:
+        config (Optional[Dict[str, Any]]): Optional configuration dictionary that can enable, disable, or alter available tools.
+    
+    Returns:
+        List[Dict[str, Any]]: A list of tool descriptions where each item contains keys such as `name`, `description`, and `parameters`.
     """
     try:
         # Parse config if provided
@@ -438,10 +446,10 @@ async def get_tools_legacy(
     adk_wrapper: ADKAgentWrapper = Depends(get_adk_wrapper)
 ):
     """
-    Get list of available tools (legacy GET endpoint).
-
-    Returns base tools without configuration-dependent tools.
-    Use POST /api/tools with config for full tool list.
+    Retrieve the base list of available tools that do not depend on a context configuration.
+    
+    Returns:
+        A list of tools available without a context configuration.
     """
     try:
         tools = adk_wrapper.get_available_tools(None)
@@ -1006,9 +1014,26 @@ class ConfigValidationRequest(BaseModel):
 @config_router.post("/config/validate")
 async def validate_configuration(request: ConfigValidationRequest):
     """
-    Validate a context engineering configuration.
+    Validate a context engineering configuration and report parsing or validation errors.
     
-    Returns validation errors if any, or success message if valid.
+    Parameters:
+        request (ConfigValidationRequest): Request containing the configuration dictionary to validate.
+    
+    Returns:
+        dict: A result object with one of the following shapes:
+            - On successful validation:
+                {
+                    "valid": True,
+                    "message": "Configuration is valid",
+                    "enabled_techniques": List[str],
+                    "timestamp": str (ISO 8601 UTC)
+                }
+            - On parsing or validation failure:
+                {
+                    "valid": False,
+                    "errors": List[dict] | List[str],  # parsing errors include dicts with field/message/details; validation errors are returned as produced by the config validator
+                    "timestamp": str (ISO 8601 UTC)
+                }
     """
     try:
         # Parse configuration
@@ -1068,22 +1093,18 @@ import re
 
 def secure_filename(filename: str) -> str:
     """
-    Sanitize a filename to prevent path traversal and remove unsafe characters.
+    Sanitize a filename by removing directory components and unsafe characters so it is safe for filesystem use.
     
-    This function:
-    - Extracts only the final basename (strips directory components)
-    - Removes leading slashes and dots
-    - Removes or replaces unsafe characters
-    - Ensures the filename is safe for filesystem operations
+    Performs these actions: extracts the final basename, strips leading dots and slashes, replaces characters other than letters, digits, dot, hyphen, underscore, and space with underscores, collapses consecutive underscores, trims leading/trailing underscores and dots, and enforces a maximum filename length while preserving the extension when possible. Raises ValueError if the resulting filename is empty.
     
-    Args:
-        filename: Original filename from user input
-        
+    Parameters:
+        filename (str): Original filename from user input.
+    
     Returns:
-        Sanitized filename safe for filesystem use
-        
+        str: Sanitized filename safe for use on a filesystem.
+    
     Raises:
-        ValueError: If filename is empty or contains only unsafe characters
+        ValueError: If `filename` is empty or the sanitized result is empty.
     """
     if not filename:
         raise ValueError("Filename cannot be empty")
@@ -1143,13 +1164,26 @@ async def upload_document(
     description: Optional[str] = None
 ):
     """
-    Upload a document to the vector store.
-
-    Supports .txt and .md files.
-
-    Args:
-        file: File to upload
-        description: Optional description for the document
+    Upload a text or Markdown document to the knowledge base, chunk it, and add the chunks to the vector store.
+    
+    Validates and sanitizes the filename, enforces a 10 MB size limit, saves the file under data/knowledge_base, loads and chunks the document, attaches the optional description to document metadata, and stores the resulting chunks in the vector store.
+    
+    Parameters:
+        file (UploadFile): Uploaded file; must have a filename and use a .txt or .md extension.
+        description (Optional[str]): Optional human-readable description to attach to the document's metadata.
+    
+    Returns:
+        dict: Summary of the upload with keys:
+            - `success` (bool): True on success.
+            - `filename` (str): Sanitized filename saved on disk.
+            - `original_filename` (str): Original uploaded filename.
+            - `file_size_bytes` (int): Size of the uploaded file in bytes.
+            - `chunks_created` (int): Number of chunks generated and added to the vector store.
+            - `doc_id` (str): Identifier of the loaded document.
+            - `timestamp` (str): ISO 8601 UTC timestamp of the operation.
+    
+    Raises:
+        HTTPException: For client errors (invalid filename, unsupported extension, file too large, path validation failures) or server errors (500) on unexpected failures.
     """
     try:
         from src.retrieval.vector_store import get_vector_store
@@ -1263,9 +1297,28 @@ async def upload_document(
 @documents_router.post("/documents/ingest")
 async def ingest_documents(request: DocumentIngestRequest):
     """
-    Bulk ingest documents from a directory.
-
-    Processes all documents in the specified directory and adds them to the vector store.
+    Ingests all documents from a directory into the vector store.
+    
+    Searches the given directory (optionally recursively) for files matching the provided extensions, chunks each document using the configured chunking strategy, and adds the resulting chunks to the vector store. Returns a summary with counts and a timestamp.
+    
+    Parameters:
+        request (DocumentIngestRequest): Ingest request containing:
+            - directory: path to search for documents
+            - recursive: whether to search subdirectories
+            - file_extensions: list of file extensions to include
+    
+    Returns:
+        dict: Summary of the ingestion containing:
+            - success (bool): whether the operation succeeded
+            - documents_processed (int): number of documents found and processed
+            - total_chunks (int): total number of chunks created and added
+            - directory (str): the directory that was processed
+            - timestamp (str): ISO-8601 UTC timestamp of the operation
+            - message (str, optional): present when no documents were found
+    
+    Raises:
+        HTTPException: 404 if the directory was not found.
+        HTTPException: 500 for other ingestion errors.
     """
     try:
         from src.retrieval.vector_store import get_vector_store
@@ -1331,7 +1384,23 @@ async def ingest_documents(request: DocumentIngestRequest):
 @documents_router.get("/documents")
 async def list_documents():
     """
-    List all documents in the knowledge base directory.
+    Return metadata for all files in the knowledge base directory.
+    
+    Scans the data/knowledge_base directory and returns a list of documents with filename, path relative to the knowledge base, file size in bytes, and last-modified timestamp in ISO 8601 (UTC). If the directory does not exist, returns an empty list and count 0.
+    
+    Returns:
+        dict: {
+            "documents": List[dict] where each dict contains:
+                - "filename" (str): the file's base name,
+                - "path" (str): path relative to the knowledge base directory,
+                - "size_bytes" (int): file size in bytes,
+                - "modified_at" (str): ISO 8601 UTC timestamp of last modification
+            "count" (int): number of documents,
+            "timestamp" (str): ISO 8601 UTC timestamp of the response
+        }
+    
+    Raises:
+        HTTPException: with status_code 500 if an error occurs while listing documents.
     """
     try:
         kb_dir = Path("data/knowledge_base")
@@ -1371,10 +1440,20 @@ async def list_documents():
 @documents_router.delete("/documents/{filename}")
 async def delete_document(filename: str):
     """
-    Delete a document from the knowledge base.
-
-    Note: This only deletes the file, not the chunks from the vector store.
-    Use /vector-store/clear to clear the vector store.
+    Delete a file from the knowledge base directory.
+    
+    This removes the filesystem file only; it does not remove any document chunks or embeddings from the vector store.
+    
+    Parameters:
+        filename (str): The original filename requested for deletion; it will be sanitized and validated.
+    
+    Returns:
+        dict: Operation result containing keys `success`, `filename` (sanitized), `original_filename`, `message`, and `timestamp`.
+    
+    Raises:
+        HTTPException: 400 if the filename is invalid or resolves outside the knowledge base directory;
+                       404 if the specified file does not exist;
+                       500 for other internal errors.
     """
     try:
         # Sanitize filename to prevent path traversal
@@ -1429,7 +1508,10 @@ async def delete_document(filename: str):
 @documents_router.get("/vector-store/stats")
 async def get_vector_store_stats():
     """
-    Get statistics about the vector store.
+    Retrieve aggregated statistics from the active vector store.
+    
+    Returns:
+        stats (dict): A mapping containing the vector store's statistics merged with a `timestamp` key holding an ISO 8601 UTC timestamp string.
     """
     try:
         from src.retrieval.vector_store import get_vector_store
@@ -1450,9 +1532,13 @@ async def get_vector_store_stats():
 @documents_router.post("/vector-store/clear")
 async def clear_vector_store():
     """
-    Clear all documents from the vector store.
-
-    This is a destructive operation that removes all embeddings.
+    Clear all documents and embeddings from the vector store.
+    
+    Returns:
+        dict: A result object with keys `success` (bool), `message` (str), and `timestamp` (ISO 8601 UTC string).
+    
+    Raises:
+        HTTPException: If an error occurs while clearing the vector store (returns status code 500).
     """
     try:
         from src.retrieval.vector_store import get_vector_store
@@ -1480,12 +1566,20 @@ async def search_vector_store(
     similarity_threshold: float = 0.7
 ):
     """
-    Search the vector store for similar documents.
-
-    Args:
-        query: Search query
-        top_k: Number of results to return
-        similarity_threshold: Minimum similarity score
+    Search the vector store for documents similar to the given query.
+    
+    Parameters:
+        query (str): Query text to search for.
+        top_k (int): Maximum number of results to return.
+        similarity_threshold (float): Minimum similarity score (0.0–1.0) required for a result to be included.
+    
+    Returns:
+        dict: {
+            "results": List[dict] — matching entries as dictionaries,
+            "count": int — number of results returned,
+            "query": str — the original query,
+            "timestamp": str — ISO 8601 UTC timestamp of the search
+        }
     """
     try:
         from src.retrieval.vector_store import get_vector_store
@@ -1512,12 +1606,20 @@ async def search_vector_store(
 @documents_router.post("/rag-tool/execute")
 async def execute_rag_tool(request: RAGToolExecuteRequest):
     """
-    Execute the RAG tool to search the knowledge base.
-
-    This endpoint is called by the LLM when it decides to use the RAG tool.
-
-    Args:
-        request: RAG tool execution request containing query, top_k, and optional config
+    Execute the RAG tool against the knowledge base and return the tool's results.
+    
+    Accepts a RAGToolExecuteRequest containing the user query, optional top_k, and an optional context configuration. If a config is provided it will be parsed and validated; if omitted a default configuration is created with the RAG tool enabled. The response includes the tool's result augmented with the original query and an ISO 8601 UTC timestamp.
+    
+    Parameters:
+        request (RAGToolExecuteRequest): Request payload with `query`, `top_k`, and optional `config`.
+    
+    Returns:
+        dict: The RAG tool execution result augmented with:
+            - `query` (str): the original query string.
+            - `timestamp` (str): ISO 8601 UTC timestamp when the result was produced.
+    
+    Raises:
+        HTTPException: 400 if the provided configuration is invalid or the RAG tool module is not configured; 500 for unexpected server errors.
     """
     try:
         from src.core.modular_pipeline import ContextPipeline, RAGToolModule
@@ -1595,4 +1697,3 @@ async def execute_rag_tool(request: RAGToolExecuteRequest):
     except Exception as e:
         logger.error(f"Error executing RAG tool: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e)) from e
-

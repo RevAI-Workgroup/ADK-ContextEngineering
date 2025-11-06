@@ -29,7 +29,11 @@ class Document:
     doc_id: Optional[str] = None
 
     def __post_init__(self):
-        """Generate doc_id if not provided."""
+        """
+        Set a deterministic `doc_id` based on the document content when no `doc_id` was provided.
+        
+        If `doc_id` is None, computes the MD5 hash of `content`, takes the first 16 hex characters, and sets `doc_id` to `doc_<16_hex_chars>`.
+        """
         if self.doc_id is None:
             # Generate ID from content hash
             content_hash = hashlib.md5(self.content.encode()).hexdigest()
@@ -43,13 +47,16 @@ class DocumentLoader:
 
     def load(self, file_path: str) -> Document:
         """
-        Load a document from file.
-
-        Args:
-            file_path: Path to the document file
-
+        Load a Document object from the given file path.
+        
+        Parameters:
+            file_path (str): Path to the source file to load.
+        
         Returns:
-            Loaded Document object
+            Document: A Document populated with the file's content and metadata.
+        
+        Raises:
+            NotImplementedError: Implementations must override this method in subclasses.
         """
         raise NotImplementedError
 
@@ -61,13 +68,18 @@ class TextDocumentLoader(DocumentLoader):
 
     def load(self, file_path: str) -> Document:
         """
-        Load a text document.
-
-        Args:
-            file_path: Path to the .txt file
-
+        Load a text document from disk.
+        
+        Parameters:
+            file_path (str): Path to the `.txt` file to load.
+        
         Returns:
-            Loaded Document object
+            Document: Document containing the file's text content and metadata (source, filename, file_type, file_size_bytes, changed_at, modified_at).
+        
+        Raises:
+            FileNotFoundError: If the given file does not exist.
+            UnicodeDecodeError: If the file cannot be decoded as UTF-8.
+            Exception: Propagates other unexpected errors encountered while reading the file.
         """
         path = Path(file_path)
 
@@ -108,13 +120,24 @@ class MarkdownDocumentLoader(DocumentLoader):
 
     def load(self, file_path: str) -> Document:
         """
-        Load a Markdown document.
-
-        Args:
-            file_path: Path to the .md file
-
+        Load a Markdown (.md) file and return a Document containing its content and file metadata.
+        
+        Parameters:
+            file_path (str): Path to the Markdown file.
+        
         Returns:
-            Loaded Document object
+            Document: Document with `content` set to the file text and `metadata` containing:
+                - source: absolute path
+                - filename: file name
+                - file_type: "md"
+                - file_size_bytes: file size in bytes
+                - created_at: creation time in ISO format
+                - modified_at: modification time in ISO format
+                - title: (optional) first H1 heading from the file
+        
+        Raises:
+            FileNotFoundError: If the file does not exist.
+            UnicodeDecodeError: If the file cannot be decoded as UTF-8.
         """
         path = Path(file_path)
 
@@ -161,17 +184,17 @@ class MarkdownDocumentLoader(DocumentLoader):
 
 def load_document(file_path: str) -> Document:
     """
-    Load a document based on file extension.
-
-    Args:
-        file_path: Path to the document file
-
+    Selects the appropriate loader by file extension and returns the loaded Document.
+    
+    Parameters:
+        file_path (str): Path to the document file to load.
+    
     Returns:
-        Loaded Document object
-
+        Document: The loaded document with content and metadata.
+    
     Raises:
-        ValueError: If file type is not supported
-        FileNotFoundError: If file doesn't exist
+        ValueError: If the file extension is not supported (supported: .txt, .md).
+        FileNotFoundError: If the specified file does not exist.
     """
     path = Path(file_path)
     extension = path.suffix.lower()
@@ -195,15 +218,19 @@ def load_documents_from_directory(
     file_extensions: Optional[List[str]] = None
 ) -> List[Document]:
     """
-    Load all documents from a directory.
-
-    Args:
-        directory: Path to the directory
-        recursive: Whether to search recursively
-        file_extensions: List of file extensions to include (default: [".txt", ".md"])
-
+    Collects and loads documents from a directory, optionally traversing subdirectories and filtering by file extension.
+    
+    Parameters:
+    	directory (str): Path to the directory to search.
+    	recursive (bool): If True, search subdirectories recursively; if False, search only the top-level directory.
+    	file_extensions (Optional[List[str]]): List of file extensions to include (each with a leading dot), defaults to [".txt", ".md"].
+    
     Returns:
-        List of loaded Document objects
+    	List[Document]: Successfully loaded Document objects.
+    
+    Raises:
+    	FileNotFoundError: If the directory does not exist.
+    	ValueError: If the provided path is not a directory.
     """
     if file_extensions is None:
         file_extensions = [".txt", ".md"]
@@ -245,13 +272,15 @@ def load_documents_from_directory(
 
 def get_document_stats(documents: List[Document]) -> Dict[str, Any]:
     """
-    Get statistics about a list of documents.
-
-    Args:
-        documents: List of Document objects
-
+    Compute aggregate statistics for a list of Document objects.
+    
     Returns:
-        Dictionary with document statistics
+        dict: A dictionary with the following keys:
+            - total_documents (int): Number of documents.
+            - total_characters (int): Sum of characters across all document contents.
+            - total_size_bytes (int): Sum of `file_size_bytes` from each document's metadata (uses 0 if missing).
+            - avg_chars_per_doc (int): Average characters per document using integer division (0 if no documents).
+            - file_types (dict): Mapping from `file_type` (from metadata, or `"unknown"`) to count of documents.
     """
     if not documents:
         return {

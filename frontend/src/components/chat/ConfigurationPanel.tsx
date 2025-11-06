@@ -34,6 +34,16 @@ interface ConfigurationPanelProps {
   className?: string
 }
 
+/**
+ * Render a configuration panel for selecting, toggling, and tuning context-engineering techniques.
+ *
+ * Provides Simple and Advanced tabs, preset loading, validation, and controls for per-technique settings.
+ *
+ * @param config - Current context engineering configuration to display and edit
+ * @param onConfigChange - Callback invoked with an updated configuration when the user modifies settings
+ * @param className - Optional CSS class applied to the outer Card container
+ * @returns The rendered configuration panel JSX element
+ */
 export function ConfigurationPanel({ config, onConfigChange, className }: ConfigurationPanelProps) {
   const [activeTab, setActiveTab] = useState<'simple' | 'advanced'>('simple')
   const [presets, setPresets] = useState<Record<string, ContextEngineeringConfig>>({})
@@ -678,4 +688,3 @@ function TechniqueSwitch({ label, description, checked, onCheckedChange, disable
     </div>
   )
 }
-

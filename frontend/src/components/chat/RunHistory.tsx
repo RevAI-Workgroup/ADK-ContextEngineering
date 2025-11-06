@@ -264,6 +264,15 @@ interface RunCardProps {
   onRerun: () => void
 }
 
+/**
+ * Render a card summarizing a single run with selection, quick re-run, and metric badges.
+ *
+ * @param run - The run record to display (id, query, timestamp, duration_ms, metrics, enabled_techniques, model, config, etc.).
+ * @param selected - Whether this run is currently selected for comparison.
+ * @param onSelect - Callback invoked when the run's selection checkbox changes; receives the new checked state.
+ * @param onRerun - Callback invoked when the re-run action is triggered for this run.
+ * @returns The RunCard React element for the provided run.
+ */
 function RunCard({ run, selected, onSelect, onRerun }: RunCardProps) {
   const queryPreview = run.query.length > 80 ? run.query.substring(0, 80) + '...' : run.query
 
@@ -330,4 +339,3 @@ function RunCard({ run, selected, onSelect, onRerun }: RunCardProps) {
     </Card>
   )
 }
-

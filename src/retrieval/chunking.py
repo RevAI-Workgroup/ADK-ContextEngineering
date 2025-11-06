@@ -28,7 +28,12 @@ class Chunk:
     chunk_id: Optional[str] = None
 
     def __post_init__(self):
-        """Generate chunk_id if not provided."""
+        """
+        Ensure the chunk has a stable identifier by generating one from metadata when absent.
+        
+        If `chunk_id` is `None`, sets `chunk_id` to "{source}_chunk_{chunk_index}" using
+        metadata["source"] (default "unknown") and metadata["chunk_index"] (default 0).
+        """
         if self.chunk_id is None:
             source = self.metadata.get("source", "unknown")
             index = self.metadata.get("chunk_index", 0)
@@ -40,14 +45,14 @@ class ChunkingStrategy:
 
     def chunk_text(self, text: str, metadata: Optional[Dict[str, Any]] = None) -> List[Chunk]:
         """
-        Chunk text into smaller pieces.
-
-        Args:
-            text: Text to chunk
-            metadata: Optional metadata to attach to chunks
-
+        Produce a list of Chunk objects from the provided text according to the strategy's rules.
+        
+        Parameters:
+            text (str): The input text to be split into chunks.
+            metadata (Optional[Dict[str, Any]]): Optional metadata to attach to each produced Chunk; if provided, implementations should merge or copy this metadata into each chunk's metadata.
+        
         Returns:
-            List of Chunk objects
+            List[Chunk]: A list of Chunk instances representing the input text partitioned by the strategy.
         """
         raise NotImplementedError
 
@@ -67,12 +72,15 @@ class FixedSizeChunking(ChunkingStrategy):
         encoding_name: str = "cl100k_base"  # GPT-4 encoding
     ):
         """
-        Initialize fixed-size chunking strategy.
-
-        Args:
-            chunk_size: Target size of each chunk in tokens
-            chunk_overlap: Number of tokens to overlap between chunks
-            encoding_name: Tiktoken encoding to use
+        Configure the fixed-size chunking strategy with tokenization parameters.
+        
+        Parameters:
+            chunk_size (int): Target number of tokens per chunk.
+            chunk_overlap (int): Number of tokens to overlap between consecutive chunks; must be less than `chunk_size`.
+            encoding_name (str): Name of the tiktoken encoding to use for tokenization.
+        
+        Raises:
+            ValueError: If `chunk_overlap` is greater than or equal to `chunk_size`.
         """
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
@@ -88,14 +96,18 @@ class FixedSizeChunking(ChunkingStrategy):
 
     def chunk_text(self, text: str, metadata: Optional[Dict[str, Any]] = None) -> List[Chunk]:
         """
-        Chunk text into fixed-size pieces with overlap.
-
-        Args:
-            text: Text to chunk
-            metadata: Optional metadata to attach to chunks
-
+        Produce fixed-size token chunks from the given text using the instance encoding, applying the configured token overlap.
+        
+        Parameters:
+            text (str): The input text to chunk. Blank or empty text returns an empty list.
+            metadata (Optional[Dict[str, Any]]): Optional metadata dictionary to attach to each chunk; the dictionary is copied and extended per chunk.
+        
         Returns:
-            List of Chunk objects
+            List[Chunk]: A list of Chunk objects. Each chunk's metadata is extended with:
+                - `chunk_index` (int): zero-based index of the chunk,
+                - `chunk_size` (int): number of tokens in the chunk,
+                - `start_token` (int): start token index (inclusive),
+                - `end_token` (int): end token index (exclusive).
         """
         if not text or not text.strip():
             return []
@@ -165,12 +177,15 @@ class SentenceChunking(ChunkingStrategy):
         encoding_name: str = "cl100k_base"
     ):
         """
-        Initialize sentence-based chunking strategy.
-
-        Args:
-            chunk_size: Target size of each chunk in tokens
-            chunk_overlap_sentences: Number of sentences to overlap
-            encoding_name: Tiktoken encoding to use
+        Configure a sentence-based chunking strategy.
+        
+        Parameters:
+            chunk_size (int): Target number of tokens per chunk.
+            chunk_overlap_sentences (int): Number of whole sentences to repeat between consecutive chunks to create overlap.
+            encoding_name (str): Name of the tiktoken encoding to use for tokenization.
+        
+        Behavior:
+            Attempts to load the specified tiktoken encoding; if loading fails, falls back to the default "cl100k_base" encoding.
         """
         self.chunk_size = chunk_size
         self.chunk_overlap_sentences = chunk_overlap_sentences
@@ -182,18 +197,16 @@ class SentenceChunking(ChunkingStrategy):
 
     def chunk_text(self, text: str, metadata: Optional[Dict[str, Any]] = None) -> List[Chunk]:
         """
-        Chunk text by sentences.
-
-        Sentences are combined until reaching chunk_size. If a single sentence
-        exceeds chunk_size, it will be split into token-based sub-chunks with
-        overlap semantics applied.
-
-        Args:
-            text: Text to chunk
-            metadata: Optional metadata to attach to chunks
-
+        Split input text into sentence-based chunks, combining sentences until a target token size is reached.
+        
+        Sentences are accumulated into chunks up to self.chunk_size (measured in tokens). If a single sentence exceeds self.chunk_size it is split into token-level sub-chunks (with token-overlap behavior determined by the strategy). Each returned Chunk includes metadata keys such as `chunk_index`, `chunk_size` (token count), and `sentence_count`.
+        
+        Parameters:
+            text (str): Text to chunk.
+            metadata (Optional[Dict[str, Any]]): Optional metadata to attach to each chunk; copied and extended with chunk-specific fields.
+        
         Returns:
-            List of Chunk objects
+            List[Chunk]: A list of sentence-based Chunk objects covering the input text.
         """
         if not text or not text.strip():
             return []
@@ -293,18 +306,15 @@ class SentenceChunking(ChunkingStrategy):
 
     def _split_oversized_sentence(self, sentence: str) -> List[Tuple[str, int]]:
         """
-        Split an oversized sentence into token-based sub-chunks.
-
-        Applies overlap semantics: calculates overlap tokens based on
-        chunk_overlap_sentences parameter. If chunk_overlap_sentences is 0,
-        no overlap is used. Otherwise, overlap is proportional to the number
-        of overlapping sentences configured.
-
-        Args:
-            sentence: Sentence that exceeds chunk_size
-
+        Split an oversized sentence into token-length sub-chunks, applying token-level overlap derived from the configured sentence-overlap setting.
+        
+        If chunk_overlap_sentences is 0 no overlap is applied. Otherwise the method estimates average tokens per sentence as max(1, chunk_size // 10), multiplies that by chunk_overlap_sentences to get overlap tokens, and caps the overlap to at most 25% of chunk_size and to be strictly less than chunk_size.
+        
+        Parameters:
+            sentence (str): Sentence whose token count exceeds the configured chunk_size.
+        
         Returns:
-            List of tuples (sub_chunk_text, token_count)
+            List[Tuple[str, int]]: A list of (sub_chunk_text, token_count) tuples for each generated sub-chunk, where token_count is the number of tokens in that sub-chunk.
         """
         # Encode sentence to tokens
         tokens = self.encoding.encode(sentence)
@@ -355,15 +365,13 @@ class SentenceChunking(ChunkingStrategy):
 
     def _split_sentences(self, text: str) -> List[str]:
         """
-        Split text into sentences.
-
-        Simple sentence splitting based on common punctuation.
-
-        Args:
-            text: Text to split
-
+        Split input text into sentences using a simple punctuation-based heuristic.
+        
+        Parameters:
+            text (str): The text to split into sentences.
+        
         Returns:
-            List of sentences
+            List[str]: Sentences obtained by splitting on sentence-ending punctuation (., !, ?) followed by whitespace; each sentence is stripped and empty entries are omitted.
         """
         import re
 
@@ -384,17 +392,14 @@ def chunk_document(
     chunk_overlap: int = 50
 ) -> List[Chunk]:
     """
-    Chunk a document using the specified strategy.
-
-    Args:
-        text: Text to chunk
-        metadata: Optional metadata to attach to chunks
-        strategy: Chunking strategy ("fixed" or "sentence")
-        chunk_size: Target chunk size in tokens
-        chunk_overlap: Overlap size (tokens for fixed, sentences for sentence-based)
-
+    Chunk a document into smaller Chunk objects using the chosen strategy.
+    
+    Parameters:
+        strategy (str): 'fixed' to produce fixed-size token chunks, or 'sentence' to produce sentence-aware chunks.
+        chunk_overlap (int): If `strategy` is 'fixed', number of tokens to overlap between consecutive chunks. If 'sentence', number of sentences to overlap between consecutive chunks.
+    
     Returns:
-        List of Chunk objects
+        List[Chunk]: Chunks produced from the input text with attached metadata.
     """
     if strategy == "fixed":
         chunker = FixedSizeChunking(
@@ -414,13 +419,20 @@ def chunk_document(
 
 def get_chunking_stats(chunks: List[Chunk]) -> Dict[str, Any]:
     """
-    Get statistics about chunks.
-
-    Args:
-        chunks: List of Chunk objects
-
+    Compute basic statistics for a list of Chunk objects.
+    
+    Parameters:
+        chunks (List[Chunk]): Chunks to analyze.
+    
     Returns:
-        Dictionary with chunking statistics
+        Dict[str, Any]: Statistics including:
+            - total_chunks (int): Number of chunks (0 if input is empty).
+            - total_characters (int): Sum of len(chunk.text) across chunks.
+            - avg_chars_per_chunk (int): Integer average characters per chunk (0 if no chunks).
+            - total_tokens (int, optional): Sum of `chunk_size` values from chunk.metadata when present.
+            - avg_tokens_per_chunk (int, optional): Integer average of token sizes (computed over chunks that have `chunk_size`).
+            - min_tokens (int, optional): Minimum token count among chunks that have `chunk_size`.
+            - max_tokens (int, optional): Maximum token count among chunks that have `chunk_size`.
     """
     if not chunks:
         return {

@@ -20,6 +20,12 @@ const ChatContext = createContext<ChatContextType | undefined>(undefined)
 
 const CONFIG_STORAGE_KEY = 'context_engineering_config'
 
+/**
+ * Provides chat state and actions to descendant components via ChatContext.
+ *
+ * @param children - React nodes that will consume the chat context
+ * @returns The ChatContext provider element containing state, setters, and `clearChat`
+ */
 export function ChatProvider({ children }: { children: ReactNode }) {
   const [messages, setMessages] = useState<Message[]>([])
   const [isProcessing, setIsProcessing] = useState(false)
@@ -103,4 +109,3 @@ export function useChatContext() {
   }
   return context
 }
-

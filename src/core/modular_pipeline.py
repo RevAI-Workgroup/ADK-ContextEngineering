@@ -180,6 +180,11 @@ class NaiveRAGModule(ContextEngineeringModule):
     """
 
     def __init__(self):
+        """
+        Initialize the NaiveRAG module with default retrieval and tokenization settings.
+        
+        Sets module name to "NaiveRAG", default retrieval parameters (chunk size, chunk overlap, top-k, similarity threshold, and embedding model), and prepares a ModuleMetrics container for the last run. Initializes lazy state for the vector store and attempts to initialize a tokenizer (tiktoken) for accurate token counting; if tokenizer initialization fails or tiktoken is unavailable, the module falls back to a word-count approximation and logs a warning.
+        """
         super().__init__("NaiveRAG")
         self.chunk_size = 512
         self.chunk_overlap = 50
@@ -206,13 +211,13 @@ class NaiveRAGModule(ContextEngineeringModule):
     
     def _count_tokens(self, text: Optional[str]) -> int:
         """
-        Count tokens in text using tiktoken if available, otherwise fall back to word count.
+        Return token count for a piece of text using the configured tokenizer when available, otherwise approximate by word count.
         
-        Args:
-            text: Text to count tokens for (can be None)
-            
+        Parameters:
+            text (Optional[str]): Input text; if None or empty, returns 0.
+        
         Returns:
-            Number of tokens (or word count approximation if tokenizer unavailable)
+            int: Number of tokens (uses tokenizer encoding if available; falls back to a word-count approximation).
         """
         if text is None or not text.strip():
             return 0
@@ -229,7 +234,21 @@ class NaiveRAGModule(ContextEngineeringModule):
             return len(text.split())
     
     def configure(self, config: Dict[str, Any]) -> None:
-        """Configure RAG parameters."""
+        """
+        Update the module's RAG configuration parameters from the given mapping.
+        
+        Parameters:
+            config (Dict[str, Any]): Mapping of configuration values. Recognized keys:
+                - "chunk_size" (int): Size of text chunks used for embeddings/search. Defaults to current value.
+                - "chunk_overlap" (int): Overlap between adjacent chunks. Defaults to current value.
+                - "top_k" (int): Number of top documents to retrieve. Defaults to current value.
+                - "similarity_threshold" (float): Minimum similarity score required to include a retrieved document. Defaults to current value.
+                - "embedding_model" (str): Name/identifier of the embedding model to use. Defaults to current value.
+        
+        Side effects:
+            Updates instance attributes (chunk_size, chunk_overlap, top_k, similarity_threshold, embedding_model)
+            and logs the new configuration summary.
+        """
         self.chunk_size = config.get("chunk_size", self.chunk_size)
         self.chunk_overlap = config.get("chunk_overlap", self.chunk_overlap)
         self.top_k = config.get("top_k", self.top_k)
@@ -242,13 +261,15 @@ class NaiveRAGModule(ContextEngineeringModule):
     
     def process(self, context: PipelineContext) -> PipelineContext:
         """
-        Process context through RAG - retrieve relevant documents and inject into context.
-
-        Args:
-            context: Pipeline context with query
-
+        Retrieve relevant documents for the pipeline query and inject retrieval results into the provided PipelineContext.
+        
+        This updates the context's `context` text with concatenated retrieved chunks and populates `context.metadata` with retrieval details (e.g., `rag_status`, `rag_retrieved_docs`, `rag_sources`, `rag_avg_similarity`, `rag_documents`, and error fields on failure). The method also records execution metrics in the module's `get_metrics()` via `_last_metrics`.
+        
+        Parameters:
+            context (PipelineContext): Pipeline context containing the `query`; will be mutated to include retrieved content and metadata.
+        
         Returns:
-            Updated context with retrieved documents
+            PipelineContext: The same PipelineContext instance with retrieval results and metadata applied.
         """
         start_time = time.time()
 
@@ -381,7 +402,12 @@ class NaiveRAGModule(ContextEngineeringModule):
         return context
     
     def get_metrics(self) -> ModuleMetrics:
-        """Get Naive RAG metrics from last execution."""
+        """
+        Retrieve metrics recorded by the last Naive RAG execution.
+        
+        Returns:
+            ModuleMetrics: Metrics from the module's most recent run, including execution time, input/output token counts, and technique-specific data.
+        """
         return self._last_metrics
 
 
@@ -403,6 +429,11 @@ class RAGToolModule(ContextEngineeringModule):
     """
 
     def __init__(self):
+        """
+        Initialize the RAGToolModule with default retrieval parameters and a tool definition.
+        
+        Sets default values for chunk_size (512), chunk_overlap (50), top_k (5), similarity_threshold (0.75), and embedding_model ("sentence-transformers/all-MiniLM-L6-v2"); defines the tool name ("search_knowledge_base") and description; initializes _last_metrics for recording module metrics and leaves _vector_store as None for lazy initialization.
+        """
         super().__init__("RAGTool")
         self.chunk_size = 512
         self.chunk_overlap = 50
@@ -417,7 +448,23 @@ class RAGToolModule(ContextEngineeringModule):
         self._vector_store = None
 
     def configure(self, config: Dict[str, Any]) -> None:
-        """Configure RAG-as-tool parameters."""
+        """
+        Update RAG-as-tool configuration from the provided dictionary.
+        
+        Reads known keys from `config` and updates the module's parameters (chunk_size, chunk_overlap, top_k,
+        similarity_threshold, embedding_model, tool_name, tool_description). If a key is missing, the existing
+        attribute value is preserved. Logs a short summary of the applied configuration.
+        
+        Parameters:
+            config (Dict[str, Any]): Mapping of configuration keys to values. Recognized keys:
+                - "chunk_size"
+                - "chunk_overlap"
+                - "top_k"
+                - "similarity_threshold"
+                - "embedding_model"
+                - "tool_name"
+                - "tool_description"
+        """
         self.chunk_size = config.get("chunk_size", self.chunk_size)
         self.chunk_overlap = config.get("chunk_overlap", self.chunk_overlap)
         self.top_k = config.get("top_k", self.top_k)
@@ -432,10 +479,10 @@ class RAGToolModule(ContextEngineeringModule):
 
     def get_tool_definition(self) -> Dict[str, Any]:
         """
-        Get the tool definition for LLM function calling.
-
+        Provide a function-style tool definition for LLM function calling.
+        
         Returns:
-            Tool definition dictionary compatible with Ollama/OpenAI function calling
+            A dict representing a function tool definition compatible with OpenAI/Ollama function-calling schemas. The dictionary contains the function name, description, and a JSON schema for parameters including a required `query` string and an optional `top_k` integer (default set to the module's `top_k`).
         """
         return {
             "type": "function",
@@ -462,14 +509,29 @@ class RAGToolModule(ContextEngineeringModule):
 
     def execute_tool(self, query: str, top_k: Optional[int] = None) -> Dict[str, Any]:
         """
-        Execute the RAG tool search.
-
-        Args:
-            query: Search query
-            top_k: Number of documents to retrieve (optional, uses default if not provided)
-
+        Perform a retrieval search using the RAG tool and return structured retrieval results.
+        
+        Execute a similarity search against the module's vector store for the given query and return retrieved documents and metadata about the retrieval operation.
+        
+        Parameters:
+            query (str): The natural-language query to search for.
+            top_k (Optional[int]): Maximum number of documents to retrieve; if omitted, the module's configured default is used.
+        
         Returns:
-            Dictionary with retrieved documents and metadata
+            Dict[str, Any]: A dictionary describing the outcome. Common keys include:
+                - `status`: One of `"success"`, `"no_results"`, `"empty"`, or `"error"`.
+                - On `"success"`:
+                    - `documents` (List[Dict]): Retrieved items with keys `text`, `source`, `similarity`, `chunk_index`, and `metadata`.
+                    - `retrieved_count` (int): Number of documents returned.
+                    - `sources` (List[str]): Unique source identifiers for the retrieved documents.
+                    - `avg_similarity` (float): Average similarity score of the returned documents.
+                    - `execution_time_ms` (float): Retrieval latency in milliseconds.
+                - On `"no_results"` or `"empty"`:
+                    - `message` (str): Human-readable explanation.
+                    - `documents` (List): Empty list.
+                - On `"error"`:
+                    - `error` (str): Error message.
+                    - `documents` (List): Empty list.
         """
         start_time = time.time()
         top_k = top_k or self.top_k
@@ -556,16 +618,15 @@ class RAGToolModule(ContextEngineeringModule):
 
     def process(self, context: PipelineContext) -> PipelineContext:
         """
-        Process context through RAG-as-tool.
-
-        This module doesn't automatically inject documents. Instead, it registers
-        the tool definition in the context metadata for the LLM to use.
-
-        Args:
-            context: Pipeline context
-
+        Register the RAG-as-tool definition in the pipeline context metadata.
+        
+        Adds this module's tool definition to context.metadata["tools"] and records registration status and tool name in metadata. Updates the module's last metrics with execution time and registration status.
+        
+        Parameters:
+        	context (PipelineContext): The pipeline context to update.
+        
         Returns:
-            Updated context with tool definition
+        	PipelineContext: The updated pipeline context containing the registered tool definition and related metadata.
         """
         start_time = time.time()
 
@@ -592,7 +653,12 @@ class RAGToolModule(ContextEngineeringModule):
         return context
 
     def get_metrics(self) -> ModuleMetrics:
-        """Get RAG-as-tool metrics from last execution."""
+        """
+        Provide metrics for the last RAG-as-tool execution.
+        
+        Returns:
+            ModuleMetrics: Metrics recorded from the most recent RAG tool invocation.
+        """
         return self._last_metrics
 
 
@@ -922,10 +988,10 @@ class ContextPipeline:
     
     def __init__(self, config: Optional[ContextEngineeringConfig] = None):
         """
-        Initialize the context pipeline.
+        Initialize the context pipeline, instantiate all available modules, and apply the provided configuration.
         
-        Args:
-            config: Optional configuration (default: baseline with all disabled)
+        Parameters:
+            config (Optional[ContextEngineeringConfig]): Pipeline configuration to use; if None, a default configuration is created (baseline with modules disabled).
         """
         self.config = config or ContextEngineeringConfig()
         self.logger = logging.getLogger(__name__)
@@ -947,7 +1013,11 @@ class ContextPipeline:
         self.logger.info("Context pipeline initialized with %d modules", len(self.modules))
     
     def _configure_modules(self) -> None:
-        """Configure all modules based on the current config."""
+        """
+        Apply the current pipeline configuration to each registered module.
+        
+        For each module, enable it and pass its module-specific settings (via the config object's __dict__) when the corresponding config flag is true; otherwise disable the module. After applying all settings, logs the list of enabled modules.
+        """
         # Naive RAG
         if self.config.naive_rag_enabled:
             self.modules["naive_rag"].enable()
@@ -1017,22 +1087,16 @@ class ContextPipeline:
         conversation_history: Optional[List[Dict[str, str]]] = None
     ) -> PipelineContext:
         """
-        Process a query through all enabled modules.
+        Orchestrates enabled context-engineering modules for the given query and produces an aggregated PipelineContext.
         
-        Modules are executed in this order:
-        1. Memory (inject conversation history)
-        2. Caching (check if cached response exists)
-        3. RAG (retrieve relevant documents)
-        4. Hybrid Search (combine with keyword search)
-        5. Reranking (improve retrieval quality)
-        6. Compression (reduce token usage)
+        Modules are executed in the fixed order: memory, caching, naive_rag, rag_tool (registered for LLM use), hybrid_search, reranking, compression. Individual module failures are recorded in context.metadata and do not stop pipeline execution.
         
-        Args:
-            query: User query to process
-            conversation_history: Optional conversation history
-            
+        Parameters:
+            query (str): The user query to process.
+            conversation_history (Optional[List[Dict[str, str]]]): Optional list of prior turns to inject into the pipeline.
+        
         Returns:
-            PipelineContext with accumulated context and metadata
+            PipelineContext: The final context with accumulated context text and metadata populated by the modules.
         """
         start_time = time.time()
         
@@ -1104,4 +1168,3 @@ class ContextPipeline:
             Module instance or None if not found
         """
         return self.modules.get(name)
-

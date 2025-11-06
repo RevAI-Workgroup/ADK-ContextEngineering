@@ -9,6 +9,15 @@ interface ToolOutputDisplayProps {
   toolCalls: ToolCall[]
 }
 
+/**
+ * Render a collapsible card that displays a list of tool call entries.
+ *
+ * Each entry shows the tool name, optional timestamp, optional description,
+ * optional parameters (pretty-printed JSON), and an optional result (string or pretty-printed JSON).
+ *
+ * @param toolCalls - Array of ToolCall entries to display; each entry may include `name`, `timestamp`, `description`, `parameters`, and `result`
+ * @returns A React element containing the collapsible "Tool Calls" card with a badge showing the count
+ */
 export function ToolOutputDisplay({ toolCalls }: ToolOutputDisplayProps) {
   // Start expanded by default to show tool information
   const [isExpanded, setIsExpanded] = useState(true)
@@ -87,4 +96,3 @@ export function ToolOutputDisplay({ toolCalls }: ToolOutputDisplayProps) {
     </Card>
   )
 }
-

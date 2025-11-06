@@ -15,6 +15,15 @@ import { Alert, AlertDescription } from '../components/ui/alert'
 import { ContextEngineeringConfig } from '../types/config.types'
 import { Tool } from '../types/agent.types'
 
+/**
+ * Renders the Agent Chat interface with configuration controls, run history, available tools, and the chat area.
+ *
+ * The component fetches available tools when the current engineering configuration changes, displays and auto-dismisses
+ * status messages for model clearing and rerun configuration, and provides controls to clear models, clear chat,
+ * open the configuration panel, view run history, and compare past runs.
+ *
+ * @returns The Agent Chat UI as a JSX element.
+ */
 export function Chat() {
   const { clearChat, messages, config, setConfig } = useChatContext()
   const [isClearing, setIsClearing] = useState(false)
@@ -298,6 +307,13 @@ interface ToolBadgeProps {
   description?: string
 }
 
+/**
+ * Render a compact badge for a tool with an optional tooltip.
+ *
+ * @param name - Visible label shown inside the badge
+ * @param description - Optional text shown as the element's tooltip; falls back to `name` when omitted
+ * @returns A JSX element representing a small, rounded tool badge
+ */
 function ToolBadge({ name, description }: ToolBadgeProps) {
   return (
     <div
@@ -308,4 +324,3 @@ function ToolBadge({ name, description }: ToolBadgeProps) {
     </div>
   )
 }
-

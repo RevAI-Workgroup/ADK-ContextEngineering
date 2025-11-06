@@ -298,10 +298,14 @@ class MetricsCollector:
     
     def get_aggregate_metrics(self) -> Dict[str, float]:
         """
-        Calculate aggregate metrics across all evaluated queries.
+        Compute aggregated statistics for all collected evaluations.
+        
+        Calculates mean, minimum, and maximum for each recorded metric across evaluations, and also computes mean latency (milliseconds) and mean tokens per query.
         
         Returns:
-            Dictionary of averaged metrics
+            aggregates (Dict[str, float]): Mapping of aggregate metric names to values. Keys follow the pattern
+            "<metric_name>_mean", "<metric_name>_min", "<metric_name>_max" for each metric present, plus
+            "latency_ms_mean" and "tokens_per_query_mean".
         """
         if not self.results:
             return {}

@@ -8,7 +8,13 @@ import { api } from './api'
 import { ContextEngineeringConfig, ConfigValidationResponse, ConfigPresetsResponse, createDefaultConfig, NaiveRAGConfig } from '../types/config.types'
 
 /**
- * Type guard to validate if an object matches NaiveRAGConfig structure
+ * Checks whether a value conforms to the NaiveRAGConfig shape.
+ *
+ * Validates that `value` is an object containing the following properties:
+ * boolean `enabled`, number `chunk_size`, number `chunk_overlap`, number `top_k`,
+ * number `similarity_threshold`, and string `embedding_model`.
+ *
+ * @returns `true` if `value` has the required NaiveRAGConfig properties, `false` otherwise.
  */
 function isValidNaiveRAGConfig(value: unknown): value is NaiveRAGConfig {
   if (!value || typeof value !== 'object') {
@@ -28,8 +34,10 @@ function isValidNaiveRAGConfig(value: unknown): value is NaiveRAGConfig {
 }
 
 /**
- * Normalize configuration to ensure backward compatibility
- * Handles migration from old 'rag' to 'naive_rag' structure
+ * Normalize a ContextEngineeringConfig and migrate legacy `rag` entries into the `naive_rag` shape.
+ *
+ * @param config - Partial configuration to normalize; may contain a legacy `rag` property that will be migrated if valid
+ * @returns A complete ContextEngineeringConfig with defaults applied and `naive_rag`/`rag_tool` ensured (legacy `rag` migrated or replaced by defaults)
  */
 function normalizeConfig(config: Partial<ContextEngineeringConfig> & { rag?: unknown }): ContextEngineeringConfig {
   const defaultConfig = createDefaultConfig()
@@ -98,4 +106,3 @@ export const configService = {
     return normalizeConfig(response.data)
   },
 }
-

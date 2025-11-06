@@ -22,6 +22,13 @@ const navItems = [
   { path: '/vector-store', label: 'Vector Store', icon: Database },
 ]
 
+/**
+ * Renders the application's sidebar containing the header, navigation menu, and footer with a theme toggle.
+ *
+ * The navigation highlights the active route based on the current location. Clicking a navigation link closes the sidebar.
+ *
+ * @returns A JSX element representing the application's sidebar layout with navigation and footer.
+ */
 export function AppSidebar() {
   const location = useLocation()
   const { setOpenMobile, setOpen, isMobile } = useSidebar()
@@ -78,4 +85,3 @@ export function AppSidebar() {
     </Sidebar>
   )
 }
-

@@ -6,6 +6,12 @@ interface ThinkingDisplayProps {
   steps: string[]
 }
 
+/**
+ * Render a card that displays an agent's ordered thinking steps.
+ *
+ * @param steps - Array of step descriptions to display in order
+ * @returns A card element showing each step numbered and a badge with the total step count
+ */
 export function ThinkingDisplay({ steps }: ThinkingDisplayProps) {
   return (
     <Card className="bg-blue-50 border-blue-200">
@@ -31,4 +37,3 @@ export function ThinkingDisplay({ steps }: ThinkingDisplayProps) {
     </Card>
   )
 }
-

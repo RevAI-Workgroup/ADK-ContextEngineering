@@ -9,6 +9,13 @@ import { Metrics } from './pages/Metrics'
 import VectorStore from './pages/VectorStore'
 import { NotFound } from './pages/NotFound'
 
+/**
+ * Application root component that configures theme and global providers and defines client-side routes.
+ *
+ * Defines routes: index ("/") → Home, "/chat" → Chat, "/metrics" → Metrics, "/vector-store" → VectorStore, and wildcard → NotFound.
+ *
+ * @returns The root JSX element composed of ThemeProvider, TooltipProvider, ChatProvider, and the app Router
+ */
 function App() {
   return (
     <ThemeProvider defaultTheme="dark">
@@ -32,4 +39,3 @@ function App() {
 }
 
 export default App
-

@@ -11,6 +11,20 @@ interface ChatInputProps {
   uploadingFile?: boolean
 }
 
+/**
+ * Renders a chat input with a text field, send button, and an optional file upload control.
+ *
+ * The input supports Enter to send (Shift+Enter inserts a newline). If `onFileUpload` is provided,
+ * a hidden file picker and upload button are rendered; selected files are validated for extension
+ * (`.txt`, `.md`) and a 10MB size limit before being passed to `onFileUpload`.
+ *
+ * @param onSend - Called with the trimmed message when the user sends a message
+ * @param onFileUpload - Optional callback invoked with a validated File when a user selects a file
+ * @param disabled - When true, disables all interactive controls
+ * @param placeholder - Placeholder text shown in the input when empty
+ * @param uploadingFile - When true, disables the upload button to indicate an ongoing upload
+ * @returns The chat input JSX element
+ */
 export function ChatInput({
   onSend,
   onFileUpload,
@@ -101,4 +115,3 @@ export function ChatInput({
     </div>
   )
 }
-
