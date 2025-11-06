@@ -48,7 +48,8 @@ function startBackend() {
       });
     } else {
       // Unix (macOS/Linux): Use bash to source activation and run uvicorn
-      backendProcess = spawn('bash', ['-c', `source venv/bin/activate && export PYTHONPATH="${rootDir}:$PYTHONPATH" && uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000`], {
+      // Match start-dev.sh: export PYTHONPATH="${PYTHONPATH}:$(pwd)"
+      backendProcess = spawn('bash', ['-c', `source venv/bin/activate && export PYTHONPATH="$PYTHONPATH:${rootDir}" && uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000`], {
         cwd: rootDir,
         stdio: 'pipe'
       });

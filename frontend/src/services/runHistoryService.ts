@@ -19,7 +19,7 @@ export const runHistoryService = {
     if (query) params.append('query', query)
 
     const response = await api.get(`/api/runs?${params.toString()}`)
-    return response.data
+    return response.data.runs || []
   },
 
   /**
@@ -27,7 +27,7 @@ export const runHistoryService = {
    */
   async getRunById(runId: string): Promise<RunRecord> {
     const response = await api.get(`/api/runs/${runId}`)
-    return response.data
+    return response.data.run
   },
 
   /**
