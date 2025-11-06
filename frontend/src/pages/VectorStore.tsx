@@ -130,7 +130,7 @@ const VectorStore: React.FC = () => {
 
     try {
       await deleteDocument(filename);
-      await fetchDocuments();
+      await Promise.all([fetchDocuments(), fetchStats()]);
       alert('Document deleted successfully');
     } catch (err) {
       console.error('Delete failed:', err);
