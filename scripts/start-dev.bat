@@ -4,7 +4,7 @@ REM Starts both backend and frontend, handles graceful shutdown
 
 setlocal EnableDelayedExpansion
 
-cd /d "%~dp0"
+cd /d "%~dp0\.."
 
 echo.
 echo ═══════════════════════════════════════════

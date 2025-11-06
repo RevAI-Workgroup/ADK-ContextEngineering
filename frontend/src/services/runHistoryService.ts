@@ -43,6 +43,9 @@ export const runHistoryService = {
    * @param runIds - Array of run IDs to compare
    */
   async compareRuns(runIds: string[]): Promise<RunComparison> {
+    if (!runIds || runIds.length === 0) {
+      throw new Error('At least one run ID is required for comparison')
+    }
     const params = new URLSearchParams()
     runIds.forEach(id => params.append('run_ids', id))
     const response = await api.get(`/api/runs/compare?${params.toString()}`)

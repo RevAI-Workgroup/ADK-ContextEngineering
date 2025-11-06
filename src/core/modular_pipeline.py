@@ -15,6 +15,11 @@ from typing import Dict, Any, List, Optional
 import logging
 import time
 
+try:
+    import tiktoken
+except ImportError:
+    tiktoken = None
+
 from src.core.context_config import ContextEngineeringConfig
 
 logger = logging.getLogger(__name__)
@@ -28,8 +33,10 @@ class ModuleMetrics:
     Attributes:
         module_name: Name of the module
         execution_time_ms: Time taken to execute the module
-        input_tokens: Number of tokens in input
-        output_tokens: Number of tokens in output
+        input_tokens: Number of tokens in input (uses tiktoken when available, 
+                     otherwise word count approximation)
+        output_tokens: Number of tokens in output (uses tiktoken when available,
+                      otherwise word count approximation)
         technique_specific: Dictionary of technique-specific metrics
     """
     module_name: str
@@ -177,12 +184,49 @@ class NaiveRAGModule(ContextEngineeringModule):
         self.chunk_size = 512
         self.chunk_overlap = 50
         self.top_k = 5
-        self.similarity_threshold = 0.2  # Optimized for better recall with acceptable precision
+        self.similarity_threshold = 0.75  # Conservative industry-standard for ensuring relevant results
         self.embedding_model = "sentence-transformers/all-MiniLM-L6-v2"
         self._last_metrics = ModuleMetrics(module_name=self.name)
 
         # Lazy initialization of vector store (only when needed)
         self._vector_store = None
+        
+        # Initialize tokenizer for accurate token counting (initialized once, not per-call)
+        self._tokenizer_encoding = None
+        if tiktoken is not None:
+            try:
+                # Use cl100k_base encoding (GPT-4/GPT-3.5 compatible)
+                self._tokenizer_encoding = tiktoken.get_encoding("cl100k_base")
+                self.logger.debug("Tokenizer initialized for accurate token counting")
+            except Exception as e:
+                self.logger.warning(f"Failed to initialize tiktoken, falling back to word count approximation: {e}")
+                self._tokenizer_encoding = None
+        else:
+            self.logger.warning("tiktoken not available, using word count approximation for token counting")
+    
+    def _count_tokens(self, text: Optional[str]) -> int:
+        """
+        Count tokens in text using tiktoken if available, otherwise fall back to word count.
+        
+        Args:
+            text: Text to count tokens for (can be None)
+            
+        Returns:
+            Number of tokens (or word count approximation if tokenizer unavailable)
+        """
+        if text is None or not text.strip():
+            return 0
+        
+        if self._tokenizer_encoding is not None:
+            try:
+                return len(self._tokenizer_encoding.encode(text))
+            except Exception as e:
+                self.logger.warning(f"Token counting failed, falling back to word count: {e}")
+                # Fall back to word count on error
+                return len(text.split())
+        else:
+            # Fallback to word count approximation when tiktoken unavailable
+            return len(text.split())
     
     def configure(self, config: Dict[str, Any]) -> None:
         """Configure RAG parameters."""
@@ -311,8 +355,8 @@ class NaiveRAGModule(ContextEngineeringModule):
             self._last_metrics = ModuleMetrics(
                 module_name=self.name,
                 execution_time_ms=execution_time,
-                input_tokens=len(context.query.split()),
-                output_tokens=len(context.context.split()) if context.context else 0,
+                input_tokens=self._count_tokens(context.query),
+                output_tokens=self._count_tokens(context.context),
                 technique_specific={
                     "status": context.metadata.get("rag_status"),
                     "retrieved_docs": len(results),
@@ -363,7 +407,7 @@ class RAGToolModule(ContextEngineeringModule):
         self.chunk_size = 512
         self.chunk_overlap = 50
         self.top_k = 5
-        self.similarity_threshold = 0.2
+        self.similarity_threshold = 0.75
         self.embedding_model = "sentence-transformers/all-MiniLM-L6-v2"
         self.tool_name = "search_knowledge_base"
         self.tool_description = "Search the knowledge base for relevant information about a specific topic or question"

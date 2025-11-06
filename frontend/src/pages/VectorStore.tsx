@@ -56,6 +56,7 @@ const VectorStore: React.FC = () => {
       setDocuments(data.documents);
     } catch (err) {
       console.error('Failed to fetch documents:', err);
+      setError('Failed to load documents');
     }
   };
 
@@ -80,6 +81,8 @@ const VectorStore: React.FC = () => {
       setSearchResults(data.results);
     } catch (err) {
       console.error('Search failed:', err);
+      alert('Search failed. Please try again.');
+      setSearchResults([]);
     }
   };
 
@@ -246,7 +249,7 @@ const VectorStore: React.FC = () => {
             placeholder="Enter search query..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+            onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
             className="flex-1"
           />
           <Button onClick={handleSearch}>

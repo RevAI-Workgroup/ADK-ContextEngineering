@@ -5,7 +5,9 @@ Tests basic functionality without starting the full server.
 """
 
 import sys
-sys.path.insert(0, '/home/user/ADK-ContextEngineering')
+import os
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, project_root)
 
 print("Testing Phase 3 RAG module imports...")
 
@@ -43,10 +45,11 @@ try:
 
     # Create a test vector store (in-memory, no persistence)
     import tempfile
-    import os
-    temp_dir = tempfile.mkdtemp()
+    import shutil
+    temp_dir = None
 
     try:
+        temp_dir = tempfile.mkdtemp()
         vs = VectorStore(persist_directory=temp_dir, collection_name="test_collection")
         print(f"✓ Created vector store at {temp_dir}")
 
@@ -70,15 +73,17 @@ try:
         stats = vs.get_stats()
         print(f"✓ Stats: {stats['total_documents']} docs, {stats['storage_size_mb']:.2f}MB")
 
-        # Clean up
-        import shutil
-        shutil.rmtree(temp_dir)
-        print(f"✓ Cleaned up test directory")
-
     except Exception as e:
         print(f"✗ Vector store test failed: {e}")
         import traceback
         traceback.print_exc()
+    finally:
+        # Always clean up temporary directory
+        if temp_dir and os.path.exists(temp_dir):
+            try:
+                shutil.rmtree(temp_dir)
+            except (OSError, FileNotFoundError) as cleanup_error:
+                print(f"⚠ Warning: Failed to clean up temporary directory {temp_dir}: {cleanup_error}")
 
     print("\n" + "="*50)
     print("Basic functionality tests passed!")

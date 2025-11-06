@@ -37,9 +37,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         if (parsed.rag && !parsed.naive_rag) {
           console.log('Migrating old RAG config to naive_rag')
           const defaultConfig = createDefaultConfig()
+          const { rag, ...rest } = parsed
           return {
-            ...parsed,
-            naive_rag: parsed.rag,
+            ...rest,
+            naive_rag: rag,
             rag_tool: defaultConfig.rag_tool,
           }
         }

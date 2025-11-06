@@ -6,8 +6,8 @@ context engineering techniques that can be toggled on/off and configured
 dynamically for experimentation and comparison.
 """
 
-from dataclasses import dataclass, field, asdict
-from typing import Dict, Any, Optional, List
+from dataclasses import dataclass, field, asdict, fields
+from typing import Dict, Any, List
 import json
 from enum import Enum
 
@@ -32,7 +32,7 @@ class NaiveRAGConfig:
     chunk_size: int = 512
     chunk_overlap: int = 50
     top_k: int = 5
-    similarity_threshold: float = 0.2  # Optimized for better recall with acceptable precision
+    similarity_threshold: float = 0.75  # Conservative industry-standard for ensuring relevant results
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
 
 
@@ -49,7 +49,7 @@ class RAGToolConfig:
     chunk_size: int = 512
     chunk_overlap: int = 50
     top_k: int = 5
-    similarity_threshold: float = 0.2
+    similarity_threshold: float = 0.75
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     tool_name: str = "search_knowledge_base"
     tool_description: str = "Search the knowledge base for relevant information about a specific topic or question"
@@ -193,10 +193,35 @@ class ContextEngineeringConfig:
         """
         return json.dumps(self.to_dict(), indent=2)
     
+    @staticmethod
+    def _filter_dict_for_dataclass(dataclass_type: type, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Filter dictionary to only include valid dataclass field names.
+        
+        This allows forward-compatible deserialization by ignoring unknown keys.
+        
+        Args:
+            dataclass_type: The dataclass type to filter for
+            data: Dictionary to filter
+            
+        Returns:
+            Filtered dictionary containing only valid field names
+        """
+        if not data:
+            return {}
+        
+        # Get set of valid field names from the dataclass
+        valid_fields = {f.name for f in fields(dataclass_type)}
+        
+        # Return only keys that are valid field names
+        return {k: v for k, v in data.items() if k in valid_fields}
+    
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ContextEngineeringConfig":
         """
         Create configuration from dictionary.
+        
+        Unknown keys in nested config dictionaries are ignored for forward compatibility.
         
         Args:
             data: Dictionary containing configuration data
@@ -214,14 +239,15 @@ class ContextEngineeringConfig:
         hybrid_search_data = data.get('hybrid_search', {})
         memory_data = data.get('memory', {})
 
+        # Filter each nested dict to only include valid dataclass field names
         return cls(
-            naive_rag=NaiveRAGConfig(**naive_rag_data),
-            rag_tool=RAGToolConfig(**rag_tool_data),
-            compression=CompressionConfig(**compression_data),
-            reranking=RerankingConfig(**reranking_data),
-            caching=CachingConfig(**caching_data),
-            hybrid_search=HybridSearchConfig(**hybrid_search_data),
-            memory=MemoryConfig(**memory_data),
+            naive_rag=NaiveRAGConfig(**cls._filter_dict_for_dataclass(NaiveRAGConfig, naive_rag_data)),
+            rag_tool=RAGToolConfig(**cls._filter_dict_for_dataclass(RAGToolConfig, rag_tool_data)),
+            compression=CompressionConfig(**cls._filter_dict_for_dataclass(CompressionConfig, compression_data)),
+            reranking=RerankingConfig(**cls._filter_dict_for_dataclass(RerankingConfig, reranking_data)),
+            caching=CachingConfig(**cls._filter_dict_for_dataclass(CachingConfig, caching_data)),
+            hybrid_search=HybridSearchConfig(**cls._filter_dict_for_dataclass(HybridSearchConfig, hybrid_search_data)),
+            memory=MemoryConfig(**cls._filter_dict_for_dataclass(MemoryConfig, memory_data)),
             model=data.get('model', 'qwen2.5:7b'),
             max_context_tokens=data.get('max_context_tokens', 4096),
             temperature=data.get('temperature', 0.7)
@@ -325,19 +351,18 @@ class ContextEngineeringConfig:
                 errors.append("RAG-as-tool tool_name must be specified")
         
         # Validate compression settings
-        if self.compression.enabled:
-            if not (0.0 < self.compression.compression_ratio < 1.0):
-                errors.append("Compression ratio must be between 0 and 1")
-            if self.compression.max_compressed_tokens <= 0:
-                errors.append("Compression max_compressed_tokens must be positive")
-        
-        # Validate reranking settings
-        if self.reranking.enabled:
-            if not self.naive_rag.enabled:
-                errors.append("Reranking requires Naive RAG to be enabled")
-            if self.reranking.top_n_after_rerank <= 0:
-                errors.append("Reranking top_n_after_rerank must be positive")
-            if self.reranking.top_n_after_rerank > self.naive_rag.top_k:
+        # Validate hybrid search settings
+        if self.hybrid_search.enabled:
+            if not (self.naive_rag.enabled or self.rag_tool.enabled):
+                errors.append("Hybrid search requires either Naive RAG or RAG-as-tool to be enabled")
+            if not (0.0 <= self.hybrid_search.bm25_weight <= 1.0):
+                errors.append("Hybrid search bm25_weight must be between 0 and 1")
+            if not (0.0 <= self.hybrid_search.vector_weight <= 1.0):
+                errors.append("Hybrid search vector_weight must be between 0 and 1")
+            if abs(self.hybrid_search.bm25_weight + self.hybrid_search.vector_weight - 1.0) > 0.01:
+                errors.append("Hybrid search weights must sum to 1.0")
+            if self.hybrid_search.top_k_per_method <= 0:
+                errors.append("Hybrid search top_k_per_method must be positive")
                 errors.append("Reranking top_n cannot exceed Naive RAG top_k")
             if not (0.0 <= self.reranking.rerank_threshold <= 1.0):
                 errors.append("Reranking threshold must be between 0 and 1")

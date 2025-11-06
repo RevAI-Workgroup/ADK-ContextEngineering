@@ -85,7 +85,7 @@ class TextDocumentLoader(DocumentLoader):
                 "filename": path.name,
                 "file_type": "txt",
                 "file_size_bytes": path.stat().st_size,
-                "created_at": datetime.fromtimestamp(path.stat().st_ctime).isoformat(),
+                "changed_at": datetime.fromtimestamp(path.stat().st_ctime).isoformat(),
                 "modified_at": datetime.fromtimestamp(path.stat().st_mtime).isoformat()
             }
 

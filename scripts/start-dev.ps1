@@ -35,9 +35,13 @@ function Cleanup {
         Remove-Job -Job $FrontendJob -ErrorAction SilentlyContinue
     }
     
-    # Kill any remaining uvicorn or vite processes
-    Get-Process -Name "uvicorn" -ErrorAction SilentlyContinue | Stop-Process -Force
-    Get-Process | Where-Object { $_.CommandLine -like "*vite*" } -ErrorAction SilentlyContinue | Stop-Process -Force
+    # Kill any remaining Python (uvicorn) processes on port 8000
+    Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue | 
+        ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
+    
+    # Kill any Node (vite) processes on port 5173
+    Get-NetTCPConnection -LocalPort 5173 -ErrorAction SilentlyContinue | 
+        ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
     
     Write-Log "SYSTEM" "All servers stopped" "Yellow"
     exit $Script:ExitCode

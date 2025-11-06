@@ -30,11 +30,12 @@ export interface RunSummary {
 }
 
 export interface MetricComparison {
-  metric_name: string
+  metric_name?: string  // Optional when used as dictionary value (key is the metric name)
   values: number[]
   best_index: number
   worst_index: number
-  improvement_pct?: number
+  differences: number[]  // Differences between runs (first run is baseline: 0)
+  improvement_pct?: number  // Optional percentage improvement calculation
 }
 
 export interface ConfigDifference {
@@ -46,14 +47,7 @@ export interface ConfigDifference {
 export interface RunComparison {
   runs: RunRecord[]
   query: string
-  metrics_comparison: {
-    [metricName: string]: {
-      values: number[]
-      best_index: number
-      worst_index: number
-      differences: number[]
-    }
-  }
+  metrics_comparison: Record<string, Omit<MetricComparison, 'metric_name'>>
   config_comparison: {
     differences: ConfigDifference[]
     enabled_techniques: string[][]

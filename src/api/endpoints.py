@@ -163,7 +163,8 @@ async def chat(
         metrics = metrics_collector.collect_response_metrics(result)
 
         # Extract pipeline metrics from result if available
-        pipeline_metrics = result.get("metrics", {}).get("pipeline_metrics") if result.get("metrics") else None
+        metrics_data = result.get("metrics")
+        pipeline_metrics = metrics_data.get("pipeline_metrics") if isinstance(metrics_data, dict) else None
 
         return ChatResponse(
             response=result.get("response", ""),
@@ -1032,6 +1033,64 @@ async def validate_configuration(request: ConfigValidationRequest):
 
 from fastapi import UploadFile, File
 from pathlib import Path
+import re
+
+
+def secure_filename(filename: str) -> str:
+    """
+    Sanitize a filename to prevent path traversal and remove unsafe characters.
+    
+    This function:
+    - Extracts only the final basename (strips directory components)
+    - Removes leading slashes and dots
+    - Removes or replaces unsafe characters
+    - Ensures the filename is safe for filesystem operations
+    
+    Args:
+        filename: Original filename from user input
+        
+    Returns:
+        Sanitized filename safe for filesystem use
+        
+    Raises:
+        ValueError: If filename is empty or contains only unsafe characters
+    """
+    if not filename:
+        raise ValueError("Filename cannot be empty")
+    
+    # Extract only the basename, removing any directory components
+    # This prevents path traversal attacks like "../../../etc/passwd"
+    basename = Path(filename).name
+    
+    # Remove leading dots and slashes
+    basename = basename.lstrip('.\\/')
+    
+    if not basename:
+        raise ValueError("Filename contains only unsafe characters")
+    
+    # Remove or replace unsafe characters
+    # Keep alphanumeric, dots, hyphens, underscores, and spaces
+    # Replace other characters with underscores
+    safe_chars = re.sub(r'[^a-zA-Z0-9._\-\s]', '_', basename)
+    
+    # Remove multiple consecutive underscores
+    safe_chars = re.sub(r'_+', '_', safe_chars)
+    
+    # Remove leading/trailing underscores and dots
+    safe_chars = safe_chars.strip('_.')
+    
+    if not safe_chars:
+        raise ValueError("Filename contains only unsafe characters")
+    
+    # Limit filename length to prevent filesystem issues
+    max_length = 255
+    if len(safe_chars) > max_length:
+        # Preserve extension if present
+        name_part = Path(safe_chars).stem[:max_length - 10]  # Reserve space for extension
+        ext_part = Path(safe_chars).suffix
+        safe_chars = name_part + ext_part
+    
+    return safe_chars
 
 
 class DocumentIngestRequest(BaseModel):
@@ -1039,6 +1098,13 @@ class DocumentIngestRequest(BaseModel):
     directory: str = Field(..., description="Directory path to ingest documents from")
     recursive: bool = Field(True, description="Whether to search recursively")
     file_extensions: Optional[List[str]] = Field(None, description="File extensions to include")
+
+
+class RAGToolExecuteRequest(BaseModel):
+    """Request model for RAG tool execution."""
+    query: str = Field(..., description="Search query")
+    top_k: int = Field(5, description="Number of documents to retrieve")
+    config: Optional[Dict[str, Any]] = Field(None, description="Optional context engineering configuration")
 
 
 @documents_router.post("/documents/upload")
@@ -1060,26 +1126,65 @@ async def upload_document(
         from src.retrieval.document_loader import load_document
         from src.retrieval.chunking import chunk_document
 
-        # Validate file type
-        file_extension = Path(file.filename).suffix.lower()
+        # Validate and sanitize filename to prevent path traversal
+        if not file.filename:
+            raise HTTPException(
+                status_code=400,
+                detail="Filename is required"
+            )
+        
+        try:
+            sanitized_filename = secure_filename(file.filename)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid filename: {str(e)}"
+            )
+        
+        # Validate file type using sanitized filename
+        file_extension = Path(sanitized_filename).suffix.lower()
         if file_extension not in [".txt", ".md"]:
             raise HTTPException(
                 status_code=400,
                 detail=f"Unsupported file type: {file_extension}. Supported: .txt, .md"
             )
-
-        # Create knowledge base directory
+        
+        # Validate file size (e.g., 10MB limit)
+        MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+        content = await file.read()
+        if len(content) > MAX_FILE_SIZE:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File too large. Maximum size: {MAX_FILE_SIZE / (1024*1024):.1f}MB"
+            )
+        
+        # Ensure knowledge base directory exists
         kb_dir = Path("data/knowledge_base")
         kb_dir.mkdir(parents=True, exist_ok=True)
-
+        
+        # Construct safe file path using sanitized filename
+        file_path = kb_dir / sanitized_filename
+        
+        # Ensure the resolved path is still within kb_dir (defense in depth)
+        try:
+            file_path = file_path.resolve()
+            kb_dir_resolved = kb_dir.resolve()
+            if not file_path.is_relative_to(kb_dir_resolved):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid file path detected"
+                )
+        except (ValueError, OSError) as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid file path: {str(e)}"
+            )
+        
         # Save uploaded file
-        file_path = kb_dir / file.filename
-        content = await file.read()
-
         with open(file_path, "wb") as f:
             f.write(content)
 
-        logger.info(f"Saved uploaded file: {file.filename}")
+        logger.info(f"Saved uploaded file: {sanitized_filename} (original: {file.filename})")
 
         # Load document
         document = load_document(str(file_path))
@@ -1110,7 +1215,8 @@ async def upload_document(
 
         return {
             "success": True,
-            "filename": file.filename,
+            "filename": sanitized_filename,
+            "original_filename": file.filename,
             "file_size_bytes": len(content),
             "chunks_created": len(chunks),
             "doc_id": document.doc_id,
@@ -1209,14 +1315,15 @@ async def list_documents():
 
         # Get all files
         documents = []
-        for file_path in kb_dir.rglob("*"):
-            if file_path.is_file() and file_path.suffix.lower() in [".txt", ".md"]:
+        for file_path in kb_dir.iterdir():
+            if file_path.is_file():
                 documents.append({
                     "filename": file_path.name,
                     "path": str(file_path.relative_to(kb_dir)),
                     "size_bytes": file_path.stat().st_size,
                     "modified_at": datetime.fromtimestamp(
-                        file_path.stat().st_mtime
+                        file_path.stat().st_mtime,
+                        tz=timezone.utc
                     ).isoformat()
                 })
 
@@ -1240,19 +1347,44 @@ async def delete_document(filename: str):
     Use /vector-store/clear to clear the vector store.
     """
     try:
+        # Sanitize filename to prevent path traversal
+        try:
+            sanitized_filename = secure_filename(filename)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid filename: {str(e)}"
+            )
+        
         kb_dir = Path("data/knowledge_base")
-        file_path = kb_dir / filename
+        file_path = kb_dir / sanitized_filename
+        
+        # Ensure the resolved path is still within kb_dir (defense in depth)
+        try:
+            file_path = file_path.resolve()
+            kb_dir_resolved = kb_dir.resolve()
+            if not file_path.is_relative_to(kb_dir_resolved):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid file path detected"
+                )
+        except (ValueError, OSError) as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid file path: {str(e)}"
+            )
 
         if not file_path.exists():
-            raise HTTPException(status_code=404, detail=f"Document '{filename}' not found")
+            raise HTTPException(status_code=404, detail=f"Document '{sanitized_filename}' not found")
 
         # Delete file
         file_path.unlink()
-        logger.info(f"Deleted document: {filename}")
+        logger.info(f"Deleted document: {sanitized_filename} (original: {filename})")
 
         return {
             "success": True,
-            "filename": filename,
+            "filename": sanitized_filename,
+            "original_filename": filename,
             "message": "Document deleted successfully",
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
@@ -1348,32 +1480,67 @@ async def search_vector_store(
 
 
 @documents_router.post("/rag-tool/execute")
-async def execute_rag_tool(
-    query: str,
-    top_k: int = 5,
-    config: Optional[ContextEngineeringConfig] = None
-):
+async def execute_rag_tool(request: RAGToolExecuteRequest):
     """
     Execute the RAG tool to search the knowledge base.
 
     This endpoint is called by the LLM when it decides to use the RAG tool.
 
     Args:
-        query: Search query
-        top_k: Number of documents to retrieve
-        config: Optional configuration (uses default if not provided)
+        request: RAG tool execution request containing query, top_k, and optional config
     """
     try:
         from src.core.modular_pipeline import ContextPipeline, RAGToolModule
 
+        # Parse config if provided
+        context_config = None
+        if request.config:
+            try:
+                context_config = ContextEngineeringConfig.from_dict(request.config)
+            except (ValueError, TypeError, KeyError) as config_error:
+                error_msg = f"Invalid configuration: {str(config_error)}"
+                logger.error(
+                    "RAG tool configuration parsing failed: %s. Config data: %s",
+                    config_error,
+                    request.config,
+                    exc_info=True
+                )
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "error": "invalid_configuration",
+                        "message": error_msg,
+                        "details": str(config_error)
+                    }
+                )
+            
+            # Validate configuration
+            validation_errors = context_config.validate()
+            if validation_errors:
+                error_msg = f"Configuration validation failed: {validation_errors}"
+                logger.error(
+                    "RAG tool configuration validation failed: %s. Config data: %s",
+                    validation_errors,
+                    request.config,
+                    exc_info=True
+                )
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "error": "invalid_configuration",
+                        "message": error_msg,
+                        "details": str(validation_errors)
+                    }
+                )
+        
         # Get or create configuration
-        if config is None:
-            config = ContextEngineeringConfig()
+        if context_config is None:
+            context_config = ContextEngineeringConfig()
             # Enable RAG tool by default for this endpoint
-            config.rag_tool.enabled = True
+            context_config.rag_tool.enabled = True
 
         # Create pipeline
-        pipeline = ContextPipeline(config)
+        pipeline = ContextPipeline(context_config)
 
         # Get the RAG tool module
         rag_tool_module = pipeline.get_module("rag_tool")
@@ -1385,14 +1552,16 @@ async def execute_rag_tool(
             )
 
         # Execute the tool
-        result = rag_tool_module.execute_tool(query=query, top_k=top_k)
+        result = rag_tool_module.execute_tool(query=request.query, top_k=request.top_k)
 
         return {
             **result,
-            "query": query,
+            "query": request.query,
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error executing RAG tool: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e)) from e

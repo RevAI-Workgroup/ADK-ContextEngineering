@@ -13,7 +13,7 @@ export function RAGFeedback({ metadata }: RAGFeedbackProps) {
   // Start expanded by default to show RAG information
   const [isExpanded, setIsExpanded] = useState(true)
 
-  // Check which RAG method was used
+  // Check which RAG method was used (presence checks only)
   const hasNaiveRAG = metadata?.rag_status !== undefined
   const hasRAGTool = metadata?.rag_tool_status !== undefined
 
@@ -24,16 +24,44 @@ export function RAGFeedback({ metadata }: RAGFeedbackProps) {
   // Debug: log what we received
   console.log('[RAGFeedback] metadata:', metadata)
 
-  // Determine which RAG method to display (prioritize the one that has results)
-  const isNaiveRAG = hasNaiveRAG && metadata.rag_status === 'success'
-  const isRAGTool = hasRAGTool && metadata.rag_tool_status === 'registered'
+  // Determine which RAG method to display based on presence, not success
+  // Prioritize RAG-as-tool if both are present, otherwise use whichever is present
+  const displayRAGTool = hasRAGTool
+  const displayNaiveRAG = hasNaiveRAG && !hasRAGTool
 
+  // Destructure all fields
   const { rag_status, rag_retrieved_docs, rag_sources, rag_avg_similarity, rag_error, rag_message, rag_documents } = metadata
   const { rag_tool_status, rag_tool_name, rag_tool_calls, rag_tool_documents } = metadata
 
-  // Determine status icon and color
+  // Get the active status and related fields based on which RAG type we're displaying
+  const activeStatus = displayRAGTool ? rag_tool_status : rag_status
+  const activeDocuments = displayRAGTool ? rag_tool_documents : rag_documents
+  const activeRetrievedCount = displayRAGTool ? rag_tool_calls : rag_retrieved_docs
+  const activeError = displayRAGTool ? undefined : rag_error // RAG-as-tool errors may be in status
+  const activeMessage = displayRAGTool ? undefined : rag_message // RAG-as-tool messages may be in status
+
+  // Normalize status: map 'registered' to 'success' for RAG-as-tool, otherwise use as-is
+  const normalizeStatus = (status: string | undefined): string | undefined => {
+    if (status === undefined) {
+      return undefined
+    }
+    // Map tool statuses to equivalent naive RAG statuses
+    if (status === 'registered') {
+      return 'success' // registered is equivalent to success
+    }
+    // If status matches known statuses, use as-is
+    if (['success', 'empty', 'error'].includes(status)) {
+      return status
+    }
+    // Unknown status defaults to undefined (will use default case)
+    return status
+  }
+
+  const normalizedStatus = normalizeStatus(activeStatus)
+
+  // Determine status icon and color using normalized status
   const getStatusConfig = () => {
-    switch (rag_status) {
+    switch (normalizedStatus) {
       case 'success':
         return {
           icon: <CheckCircle className="h-4 w-4" />,
@@ -79,29 +107,34 @@ export function RAGFeedback({ metadata }: RAGFeedbackProps) {
             <div className={cn('flex items-center gap-2', statusConfig.color)}>
               {statusConfig.icon}
               <CardTitle className="text-sm font-medium">
-                {isRAGTool ? 'RAG-as-tool' : 'Naive RAG'} Retrieval
+                {displayRAGTool ? 'RAG-as-tool' : 'Naive RAG'} Retrieval
+                {displayRAGTool && rag_tool_name && (
+                  <span className="ml-2 text-xs font-normal text-gray-600">({rag_tool_name})</span>
+                )}
               </CardTitle>
             </div>
           </div>
           <div className="flex items-center gap-2">
             {/* Show method badge */}
-            {isRAGTool && (
+            {displayRAGTool && (
               <Badge variant="outline" className="text-xs bg-purple-50 border-purple-200 text-purple-700">
                 Tool
               </Badge>
             )}
-            {isNaiveRAG && (
+            {displayNaiveRAG && (
               <Badge variant="outline" className="text-xs bg-blue-50 border-blue-200 text-blue-700">
                 Naive
               </Badge>
             )}
 
-            {rag_status === 'success' && (
+            {normalizedStatus === 'success' && (
               <>
-                <Badge variant="secondary" className="text-xs bg-white">
-                  {rag_retrieved_docs} docs
-                </Badge>
-                {rag_avg_similarity !== undefined && (
+                {activeRetrievedCount !== undefined && (
+                  <Badge variant="secondary" className="text-xs bg-white">
+                    {activeRetrievedCount} {displayRAGTool ? 'calls' : 'docs'}
+                  </Badge>
+                )}
+                {rag_avg_similarity !== undefined && displayNaiveRAG && (
                   <Badge variant="outline" className="text-xs bg-white">
                     {(rag_avg_similarity * 100).toFixed(1)}% similarity
                   </Badge>
@@ -109,10 +142,10 @@ export function RAGFeedback({ metadata }: RAGFeedbackProps) {
               </>
             )}
             <Badge
-              variant={rag_status === 'success' ? 'default' : 'secondary'}
+              variant={normalizedStatus === 'success' ? 'default' : 'secondary'}
               className="text-xs"
             >
-              {rag_status}
+              {activeStatus ?? 'unknown'}
             </Badge>
           </div>
         </div>
@@ -121,24 +154,29 @@ export function RAGFeedback({ metadata }: RAGFeedbackProps) {
       {isExpanded && (
         <CardContent className="p-3 pt-0 space-y-3">
           {/* Success State */}
-          {rag_status === 'success' && (
+          {normalizedStatus === 'success' && (
             <>
               <div className="flex items-center gap-2 text-sm">
                 <Database className="h-4 w-4 text-gray-700" />
-                <span className="font-medium text-gray-900">{rag_retrieved_docs} documents retrieved</span>
+                <span className="font-medium text-gray-900">
+                  {displayRAGTool 
+                    ? `${activeRetrievedCount ?? 0} tool call${(activeRetrievedCount ?? 0) !== 1 ? 's' : ''} made`
+                    : `${activeRetrievedCount ?? 0} document${(activeRetrievedCount ?? 0) !== 1 ? 's' : ''} retrieved`
+                  }
+                </span>
               </div>
 
-              {rag_avg_similarity !== undefined && (
+              {rag_avg_similarity !== undefined && displayNaiveRAG && (
                 <div className="text-sm text-gray-700">
                   Average similarity: <span className="font-mono text-gray-900">{(rag_avg_similarity * 100).toFixed(2)}%</span>
                 </div>
               )}
 
-              {/* Retrieved Documents */}
-              {rag_documents && rag_documents.length > 0 && (
+              {/* Retrieved Documents - works for both RAG types */}
+              {activeDocuments && activeDocuments.length > 0 && (
                 <div className="space-y-2">
                   <div className="text-sm font-medium text-gray-900">Retrieved Documents:</div>
-                  {rag_documents.map((doc, idx) => (
+                  {activeDocuments.map((doc, idx) => (
                     <div key={idx} className="bg-white p-3 rounded border border-green-200">
                       <div className="flex items-start justify-between mb-2">
                         <div className="flex items-center gap-2">
@@ -167,8 +205,8 @@ export function RAGFeedback({ metadata }: RAGFeedbackProps) {
                 </div>
               )}
 
-              {/* Sources Summary */}
-              {rag_sources && rag_sources.length > 0 && (
+              {/* Sources Summary - only for naive RAG */}
+              {rag_sources && rag_sources.length > 0 && displayNaiveRAG && (
                 <div className="mt-2">
                   <div className="text-sm font-medium mb-1 text-gray-900">Sources:</div>
                   <div className="flex flex-wrap gap-1">
@@ -184,17 +222,23 @@ export function RAGFeedback({ metadata }: RAGFeedbackProps) {
             </>
           )}
 
-          {/* Empty State */}
-          {rag_status === 'empty' && (
+          {/* Empty State - explicitly handle both RAG types */}
+          {normalizedStatus === 'empty' && (
             <div className="text-sm text-gray-700">
-              {rag_message || 'No documents found in vector store'}
+              {displayRAGTool 
+                ? (activeMessage || 'No documents found via RAG-as-tool')
+                : (activeMessage || 'No documents found in vector store')
+              }
             </div>
           )}
 
-          {/* Error State */}
-          {rag_status === 'error' && (
+          {/* Error State - explicitly handle both RAG types */}
+          {normalizedStatus === 'error' && (
             <div className="text-sm text-red-700 bg-red-50 p-2 rounded">
-              {rag_error || 'An error occurred during retrieval'}
+              {displayRAGTool
+                ? (activeError || `RAG-as-tool error: ${activeStatus}`)
+                : (activeError || 'An error occurred during retrieval')
+              }
             </div>
           )}
         </CardContent>

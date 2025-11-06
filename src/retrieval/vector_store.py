@@ -9,6 +9,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 import logging
 from pathlib import Path
+import threading
 import chromadb
 from chromadb.config import Settings
 from chromadb.utils import embedding_functions
@@ -54,7 +55,10 @@ class VectorStore:
         self,
         persist_directory: str = "./data/chroma",
         collection_name: str = "documents",
-        embedding_function: Optional[Any] = None
+        embedding_function: Optional[Any] = None,
+        sample_limit: int = 100,
+        embedding_dimensions: Optional[int] = None,
+        allow_remote_embedding_detection: bool = False
     ):
         """
         Initialize vector store.
@@ -63,9 +67,16 @@ class VectorStore:
             persist_directory: Directory for ChromaDB persistence
             collection_name: Name of the collection to use
             embedding_function: Optional embedding function (defaults to sentence-transformers)
+            sample_limit: Default limit for sampling documents in get_stats (default: 100)
+            embedding_dimensions: Explicit embedding dimensions (avoids auto-detection)
+            allow_remote_embedding_detection: Allow auto-detection for remote embedding functions
+                (default: False to prevent expensive API calls)
         """
         self.persist_directory = Path(persist_directory)
         self.collection_name = collection_name
+        self.sample_limit = sample_limit
+        self._explicit_embedding_dimensions = embedding_dimensions
+        self.allow_remote_embedding_detection = allow_remote_embedding_detection
 
         # Create persist directory if it doesn't exist
         self.persist_directory.mkdir(parents=True, exist_ok=True)
@@ -88,7 +99,7 @@ class VectorStore:
         else:
             self.embedding_function = embedding_function
 
-        # Get or create collection
+        # Initialize or get collection
         try:
             self.collection = self.client.get_collection(
                 name=collection_name,
@@ -96,12 +107,38 @@ class VectorStore:
             )
             logger.info(f"Loaded existing collection: {collection_name}")
         except Exception:
+            logger.info(f"Collection '{collection_name}' not found, creating new one")
             self.collection = self.client.create_collection(
                 name=collection_name,
                 embedding_function=self.embedding_function,
                 metadata={"hnsw:space": "cosine"}  # Use cosine similarity
             )
             logger.info(f"Created new collection: {collection_name}")
+
+        # Cache embedding metadata (lazy-loaded when first accessed)
+        self._embedding_model_name: Optional[str] = None
+        self._embedding_dimensions: Optional[int] = None
+        self._metadata_lock = threading.Lock()
+
+    @property
+    def embedding_model_name(self) -> str:
+        """Get the embedding model name (lazy-loaded)."""
+        if self._embedding_model_name is None:
+            with self._metadata_lock:
+                # Double-check pattern: another thread may have initialized while waiting
+                if self._embedding_model_name is None:
+                    self._embedding_model_name, self._embedding_dimensions = self._extract_embedding_metadata()
+        return self._embedding_model_name
+
+    @property
+    def embedding_dimensions(self) -> int:
+        """Get the embedding dimensions (lazy-loaded)."""
+        if self._embedding_dimensions is None:
+            with self._metadata_lock:
+                # Double-check pattern: another thread may have initialized while waiting
+                if self._embedding_dimensions is None:
+                    self._embedding_model_name, self._embedding_dimensions = self._extract_embedding_metadata()
+        return self._embedding_dimensions
 
     def add_documents(
         self,
@@ -123,6 +160,20 @@ class VectorStore:
         if not texts:
             logger.warning("No texts provided to add_documents")
             return []
+
+        # Validate that ids length matches texts length if ids is provided
+        if ids is not None and len(ids) != len(texts):
+            raise ValueError(
+                f"Length mismatch: ids has {len(ids)} elements but texts has {len(texts)} elements. "
+                f"They must have the same length."
+            )
+
+        # Validate that metadatas length matches texts length if metadatas is provided
+        if metadatas is not None and len(metadatas) != len(texts):
+            raise ValueError(
+                f"Length mismatch: metadatas has {len(metadatas)} elements but texts has {len(texts)} elements. "
+                f"They must have the same length."
+            )
 
         # Generate IDs if not provided
         if ids is None:
@@ -223,8 +274,14 @@ class VectorStore:
         Delete documents by metadata filter.
 
         Args:
-            metadata_filter: Metadata filter for deletion
+            metadata_filter: Metadata filter for deletion. Must not be empty or falsy.
+
+        Raises:
+            ValueError: If metadata_filter is empty or falsy.
         """
+        if not metadata_filter:
+            raise ValueError("metadata_filter must not be empty or falsy")
+        
         try:
             self.collection.delete(where=metadata_filter)
             logger.info(f"Deleted documents matching filter: {metadata_filter}")
@@ -331,9 +388,136 @@ class VectorStore:
             logger.error(f"Clear failed: {e}", exc_info=True)
             raise
 
-    def get_stats(self) -> Dict[str, Any]:
+    def _is_local_embedding_function(self) -> bool:
+        """
+        Check if the embedding function is local (safe to call without API costs).
+
+        Returns:
+            True if the embedding function is local, False otherwise
+        """
+        # Check for explicit is_local attribute
+        if hasattr(self.embedding_function, 'is_local'):
+            return getattr(self.embedding_function, 'is_local', False)
+        
+        # SentenceTransformerEmbeddingFunction is always local
+        if isinstance(self.embedding_function, embedding_functions.SentenceTransformerEmbeddingFunction):
+            return True
+        
+        # Default: assume remote if not explicitly marked as local
+        return False
+
+    def _extract_embedding_metadata(self) -> Tuple[str, int]:
+        """
+        Extract embedding model name and dimensions from the embedding function.
+
+        Returns:
+            Tuple of (model_name, dimensions)
+        """
+        model_name = "unknown"
+        dimensions = 0
+
+        # First, check for explicitly provided dimensions
+        if self._explicit_embedding_dimensions is not None:
+            dimensions = self._explicit_embedding_dimensions
+            logger.info(f"Using explicitly provided embedding dimensions: {dimensions}")
+
+        try:
+            # Check if it's a SentenceTransformerEmbeddingFunction
+            if isinstance(self.embedding_function, embedding_functions.SentenceTransformerEmbeddingFunction):
+                # Try various ways to get the model name
+                # ChromaDB may store it as model_name, _model_name, or in the model itself
+                if hasattr(self.embedding_function, 'model_name'):
+                    model_name = self.embedding_function.model_name
+                elif hasattr(self.embedding_function, '_model_name'):
+                    model_name = self.embedding_function._model_name
+                
+                # Try to access the underlying SentenceTransformer model
+                if hasattr(self.embedding_function, 'model'):
+                    model = self.embedding_function.model
+                    # Get dimensions from the model if available (only if not explicitly provided)
+                    if dimensions == 0 and hasattr(model, 'get_sentence_embedding_dimension'):
+                        dimensions = model.get_sentence_embedding_dimension()
+                    # Try to get model name from the model
+                    if model_name == "unknown" and hasattr(model, 'model_name'):
+                        model_name = model.model_name
+                    elif model_name == "unknown" and hasattr(model, '_model_name'):
+                        model_name = model._model_name
+                    elif model_name == "unknown" and hasattr(model, 'get_sentence_embedding_dimension'):
+                        # Last resort: try to infer from model path/name
+                        if hasattr(model, '__class__'):
+                            model_name = f"sentence-transformers/{model.__class__.__name__}"
+
+            # If dimensions not yet determined, attempt auto-detection only if safe
+            if dimensions == 0:
+                is_local = self._is_local_embedding_function()
+                can_auto_detect = is_local or self.allow_remote_embedding_detection
+                
+                if can_auto_detect:
+                    try:
+                        test_embedding = self.embedding_function(["test"])
+                        if test_embedding and len(test_embedding) > 0:
+                            dimensions = len(test_embedding[0])
+                            logger.info(f"Auto-detected embedding dimensions: {dimensions}")
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to auto-detect embedding dimensions: {e}. "
+                            f"Please provide embedding_dimensions explicitly."
+                        )
+                else:
+                    logger.warning(
+                        f"Embedding dimensions not provided and auto-detection is disabled "
+                        f"(embedding function appears to be remote). "
+                        f"Please provide embedding_dimensions parameter or set "
+                        f"allow_remote_embedding_detection=True to enable auto-detection. "
+                        f"Current dimensions: {dimensions}"
+                    )
+
+            # If model_name is still unknown, try to infer from the function
+            if model_name == "unknown":
+                # Check for common attributes
+                if hasattr(self.embedding_function, '__name__'):
+                    model_name = self.embedding_function.__name__
+                elif hasattr(self.embedding_function, '__class__'):
+                    class_name = self.embedding_function.__class__.__name__
+                    if class_name == "SentenceTransformerEmbeddingFunction":
+                        # Default fallback for SentenceTransformer
+                        model_name = "sentence-transformers/all-MiniLM-L6-v2"
+                    else:
+                        model_name = f"custom_{class_name.lower()}"
+                else:
+                    model_name = "custom_embedding_function"
+
+            logger.info(
+                f"Embedding metadata: model={model_name}, dimensions={dimensions}"
+            )
+
+        except Exception as e:
+            logger.warning(
+                f"Failed to extract embedding metadata: {e}. "
+                f"Using defaults: model=unknown, dimensions={dimensions}"
+            )
+            # Only attempt fallback auto-detection if explicitly allowed
+            if dimensions == 0 and self.allow_remote_embedding_detection:
+                try:
+                    test_embedding = self.embedding_function(["test"])
+                    if test_embedding and len(test_embedding) > 0:
+                        dimensions = len(test_embedding[0])
+                        model_name = "custom_embedding_function"
+                        logger.info(f"Fallback auto-detection succeeded: dimensions={dimensions}")
+                except Exception as fallback_error:
+                    logger.warning(
+                        f"Fallback auto-detection also failed: {fallback_error}. "
+                        f"Please provide embedding_dimensions explicitly."
+                    )
+
+        return model_name, dimensions
+
+    def get_stats(self, limit: Optional[int] = None) -> Dict[str, Any]:
         """
         Get vector store statistics.
+
+        Args:
+            limit: Optional limit for sampling documents (defaults to self.sample_limit)
 
         Returns:
             Dictionary with store statistics
@@ -341,8 +525,11 @@ class VectorStore:
         try:
             count = self.count()
 
+            # Use provided limit or instance default
+            sample_limit = limit if limit is not None else self.sample_limit
+
             # Get sample documents to analyze
-            sample_docs = self.get_all_documents(limit=100)
+            sample_docs = self.get_all_documents(limit=sample_limit)
 
             # Extract unique sources
             sources = set()
@@ -360,8 +547,9 @@ class VectorStore:
                 "collection_name": self.collection_name,
                 "persist_directory": str(self.persist_directory),
                 "storage_size_mb": storage_size_mb,
-                "embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
-                "embedding_dimensions": 384
+                "embedding_model": self.embedding_model_name,
+                "embedding_dimensions": self.embedding_dimensions,
+                "sample_limit_used": sample_limit
             }
         except Exception as e:
             logger.error(f"Get stats failed: {e}", exc_info=True)
@@ -414,11 +602,15 @@ class VectorStore:
 
 # Global vector store instance (singleton pattern)
 _global_vector_store: Optional[VectorStore] = None
+_global_vector_store_params: Optional[Dict[str, str]] = None
 
 
 def get_vector_store(
     persist_directory: str = "./data/chroma",
-    collection_name: str = "documents"
+    collection_name: str = "documents",
+    embedding_function: Optional[Any] = None,
+    embedding_dimensions: Optional[int] = None,
+    allow_remote_embedding_detection: bool = False
 ) -> VectorStore:
     """
     Get global vector store instance (singleton pattern).
@@ -426,20 +618,93 @@ def get_vector_store(
     Args:
         persist_directory: Directory for ChromaDB persistence
         collection_name: Name of the collection
+        embedding_function: Optional embedding function
+        embedding_dimensions: Explicit embedding dimensions (avoids auto-detection)
+        allow_remote_embedding_detection: Allow auto-detection for remote embedding functions
 
     Returns:
         Global VectorStore instance
+
+    Raises:
+        ValueError: If called with different parameters than the existing instance
     """
-    global _global_vector_store
+    global _global_vector_store, _global_vector_store_params
+
+    # Normalize paths to ensure consistent comparison
+    persist_directory_normalized = str(Path(persist_directory).resolve())
+
+    # Parameters for this call
+    requested_params = {
+        "persist_directory": persist_directory_normalized,
+        "collection_name": collection_name
+    }
+
+    # If no instance exists, create one
     if _global_vector_store is None:
         _global_vector_store = VectorStore(
             persist_directory=persist_directory,
-            collection_name=collection_name
+            collection_name=collection_name,
+            embedding_function=embedding_function,
+            embedding_dimensions=embedding_dimensions,
+            allow_remote_embedding_detection=allow_remote_embedding_detection
         )
+        _global_vector_store_params = requested_params
+        logger.info(
+            f"Created global vector store instance: "
+            f"persist_directory={persist_directory_normalized}, "
+            f"collection_name={collection_name}"
+        )
+        return _global_vector_store
+
+    # Validate that requested parameters match existing instance parameters
+    if _global_vector_store_params is None:
+        # This shouldn't happen, but handle gracefully
+        logger.warning(
+            "Global vector store exists but parameters are not tracked. "
+            "Recreating instance with new parameters."
+        )
+        _global_vector_store = VectorStore(
+            persist_directory=persist_directory,
+            collection_name=collection_name,
+            embedding_function=embedding_function,
+            embedding_dimensions=embedding_dimensions,
+            allow_remote_embedding_detection=allow_remote_embedding_detection
+        )
+        _global_vector_store_params = requested_params
+        return _global_vector_store
+
+    # Check for parameter mismatches
+    existing_params = _global_vector_store_params
+    mismatches = []
+
+    if existing_params["persist_directory"] != requested_params["persist_directory"]:
+        mismatches.append(
+            f"persist_directory: existing='{existing_params['persist_directory']}', "
+            f"requested='{requested_params['persist_directory']}'"
+        )
+
+    if existing_params["collection_name"] != requested_params["collection_name"]:
+        mismatches.append(
+            f"collection_name: existing='{existing_params['collection_name']}', "
+            f"requested='{requested_params['collection_name']}'"
+        )
+
+    if mismatches:
+        error_msg = (
+            f"Vector store singleton was already initialized with different parameters. "
+            f"Parameter mismatches: {', '.join(mismatches)}. "
+            f"To use different parameters, call reset_vector_store() first, or use "
+            f"VectorStore() directly to create a new instance."
+        )
+        logger.error(error_msg)
+        raise ValueError(error_msg)
+
+    # Parameters match, return existing instance
     return _global_vector_store
 
 
 def reset_vector_store() -> None:
     """Reset the global vector store (useful for testing)."""
-    global _global_vector_store
+    global _global_vector_store, _global_vector_store_params
     _global_vector_store = None
+    _global_vector_store_params = None

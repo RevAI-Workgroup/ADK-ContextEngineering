@@ -249,11 +249,17 @@ async function main() {
     // Initialize Vector Store (if not already initialized)
     log('VECTOR STORE', 'Checking ChromaDB initialization...', colors.cyan);
     try {
-      const pythonCmd = isWindows ? 'python' : 'python3';
-      const initScript = path.join(rootDir, 'scripts', 'init_vector_store.py');
-      const initProcess = spawn(pythonCmd, [initScript], {
+      const initCmd = isWindows
+        ? `venv\\Scripts\\activate && python scripts\\init_vector_store.py`
+        : `source venv/bin/activate && python3 scripts/init_vector_store.py`;
+      
+      const shell = isWindows ? 'cmd' : 'bash';
+      const shellArgs = isWindows ? ['/c', initCmd] : ['-c', initCmd];
+      
+      const initProcess = spawn(shell, shellArgs, {
         cwd: rootDir,
-        stdio: 'pipe'
+        stdio: 'pipe',
+        shell: true
       });
 
       await new Promise((resolve) => {
@@ -262,7 +268,10 @@ async function main() {
             log('VECTOR STORE', 'Vector store initialized successfully', colors.cyan);
           } else {
             log('WARNING', 'Vector store initialization failed (non-critical)', colors.yellow);
-            log('WARNING', `You can manually initialize later with: ${pythonCmd} scripts/init_vector_store.py`, colors.yellow);
+            const activateCmd = isWindows 
+              ? 'venv\\Scripts\\activate && python scripts\\init_vector_store.py'
+              : 'source venv/bin/activate && python3 scripts/init_vector_store.py';
+            log('WARNING', `You can manually initialize later with: ${activateCmd}`, colors.yellow);
           }
           resolve();
         });

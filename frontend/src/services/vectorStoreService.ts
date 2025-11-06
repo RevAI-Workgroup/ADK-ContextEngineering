@@ -106,7 +106,8 @@ export const uploadDocument = async (
  * Delete a document
  */
 export const deleteDocument = async (filename: string): Promise<{ success: boolean; message: string }> => {
-  const response = await api.delete(`/api/documents/${filename}`);
+  const encodedFilename = encodeURIComponent(filename);
+  const response = await api.delete(`/api/documents/${encodedFilename}`);
   return response.data;
 };
 

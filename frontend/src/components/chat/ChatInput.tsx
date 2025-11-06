@@ -1,4 +1,4 @@
-import { useState, KeyboardEvent, useRef } from 'react'
+import { useState, KeyboardEvent, useRef, ChangeEvent } from 'react'
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
 import { Send, Paperclip } from 'lucide-react'
@@ -35,9 +35,24 @@ export function ChatInput({
     }
   }
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (file && onFileUpload) {
+      // Validate file type
+      const allowedExtensions = ['.txt', '.md']
+      const fileExtension = '.' + file.name.split('.').pop()?.toLowerCase()
+      if (!allowedExtensions.includes(fileExtension)) {
+        alert('Please upload a .txt or .md file')
+        return
+      }
+      
+      // Validate file size (e.g., max 10MB)
+      const maxSize = 10 * 1024 * 1024
+      if (file.size > maxSize) {
+        alert('File size must be less than 10MB')
+        return
+      }
+      
       onFileUpload(file)
       // Reset file input
       if (fileInputRef.current) {

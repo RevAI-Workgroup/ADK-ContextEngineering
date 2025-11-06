@@ -7,7 +7,7 @@
  * with Simple and Advanced modes
  */
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs'
 import { Switch } from '../ui/switch'
@@ -40,10 +40,20 @@ export function ConfigurationPanel({ config, onConfigChange, className }: Config
   const [selectedPreset, setSelectedPreset] = useState<ConfigPreset>('baseline')
   const [validationErrors, setValidationErrors] = useState<string[]>([])
   const [validationSuccess, setValidationSuccess] = useState(false)
+  const validationTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   // Load presets on mount
   useEffect(() => {
     loadPresets()
+  }, [])
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (validationTimeoutRef.current) {
+        clearTimeout(validationTimeoutRef.current)
+      }
+    }
   }, [])
 
   const loadPresets = async () => {
@@ -87,14 +97,29 @@ export function ConfigurationPanel({ config, onConfigChange, className }: Config
       setValidationErrors(result.errors || [])
       setValidationSuccess(result.valid)
       
+      // Clear any existing timeout before creating a new one
+      if (validationTimeoutRef.current) {
+        clearTimeout(validationTimeoutRef.current)
+        validationTimeoutRef.current = null
+      }
+      
       // Auto-dismiss success after 3 seconds
       if (result.valid) {
-        setTimeout(() => setValidationSuccess(false), 3000)
+        validationTimeoutRef.current = setTimeout(() => {
+          setValidationSuccess(false)
+          validationTimeoutRef.current = null
+        }, 3000)
       }
     } catch (error) {
       console.error('Validation error:', error)
       setValidationErrors(['Failed to validate configuration'])
       setValidationSuccess(false)
+      
+      // Clear timeout on error
+      if (validationTimeoutRef.current) {
+        clearTimeout(validationTimeoutRef.current)
+        validationTimeoutRef.current = null
+      }
     }
   }
 
@@ -113,8 +138,8 @@ export function ConfigurationPanel({ config, onConfigChange, className }: Config
               onClick={handleValidate}
               className="h-7 px-2 text-xs"
             >
-              <Check className="h-3 w-3 mr-1" />
-              Save
+              <AlertCircle className="h-3 w-3 mr-1" />
+              Validate
             </Button>
             <Button 
               variant="outline" 
@@ -250,9 +275,10 @@ export function ConfigurationPanel({ config, onConfigChange, className }: Config
                       <Slider
                         value={[config.naive_rag.chunk_size]}
                         onValueChange={([value]) => {
-                          const newConfig = { ...config }
-                          newConfig.naive_rag.chunk_size = value
-                          onConfigChange(newConfig)
+                        onConfigChange({
+                            ...config,
+                            naive_rag: { ...config.naive_rag, chunk_size: value }
+                          })
                         }}
                         min={128}
                         max={2048}

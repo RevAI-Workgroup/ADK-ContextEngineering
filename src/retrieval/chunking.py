@@ -5,7 +5,7 @@ This module provides different strategies for chunking documents into smaller
 pieces suitable for embedding and retrieval.
 """
 
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 import logging
 import tiktoken
@@ -154,6 +154,8 @@ class SentenceChunking(ChunkingStrategy):
     Sentence-based chunking.
 
     Chunks text by sentences, combining sentences until reaching target size.
+    If a single sentence exceeds chunk_size, it will be split into token-based
+    sub-chunks respecting chunk_size and overlap semantics.
     """
 
     def __init__(
@@ -182,6 +184,10 @@ class SentenceChunking(ChunkingStrategy):
         """
         Chunk text by sentences.
 
+        Sentences are combined until reaching chunk_size. If a single sentence
+        exceeds chunk_size, it will be split into token-based sub-chunks with
+        overlap semantics applied.
+
         Args:
             text: Text to chunk
             metadata: Optional metadata to attach to chunks
@@ -208,6 +214,38 @@ class SentenceChunking(ChunkingStrategy):
 
         for sentence in sentences:
             sentence_tokens = len(self.encoding.encode(sentence))
+
+            # Handle oversized sentences: split into token-based sub-chunks
+            if sentence_tokens > self.chunk_size:
+                # First, finalize current chunk if it has content
+                if current_chunk_sentences:
+                    chunk_text = " ".join(current_chunk_sentences)
+                    chunk_metadata = metadata.copy()
+                    chunk_metadata.update({
+                        "chunk_index": len(chunks),
+                        "chunk_size": current_token_count,
+                        "sentence_count": len(current_chunk_sentences)
+                    })
+                    chunks.append(Chunk(text=chunk_text, metadata=chunk_metadata))
+                    current_chunk_sentences = []
+                    current_token_count = 0
+
+                # Split oversized sentence into token-based sub-chunks
+                sentence_sub_chunks = self._split_oversized_sentence(sentence)
+                
+                for sub_chunk_text, sub_chunk_tokens in sentence_sub_chunks:
+                    chunk_metadata = metadata.copy()
+                    chunk_metadata.update({
+                        "chunk_index": len(chunks),
+                        "chunk_size": sub_chunk_tokens,
+                        "sentence_count": 1  # One sentence fragment
+                    })
+                    chunks.append(Chunk(text=sub_chunk_text, metadata=chunk_metadata))
+
+                # Reset for next sentence (no overlap for oversized sentence fragments)
+                current_chunk_sentences = []
+                current_token_count = 0
+                continue
 
             # Check if adding this sentence would exceed chunk size
             if current_token_count + sentence_tokens > self.chunk_size and current_chunk_sentences:
@@ -252,6 +290,68 @@ class SentenceChunking(ChunkingStrategy):
         logger.info(f"Chunked text into {len(chunks)} sentence-based chunks")
 
         return chunks
+
+    def _split_oversized_sentence(self, sentence: str) -> List[Tuple[str, int]]:
+        """
+        Split an oversized sentence into token-based sub-chunks.
+
+        Applies overlap semantics: calculates overlap tokens based on
+        chunk_overlap_sentences parameter. If chunk_overlap_sentences is 0,
+        no overlap is used. Otherwise, overlap is proportional to the number
+        of overlapping sentences configured.
+
+        Args:
+            sentence: Sentence that exceeds chunk_size
+
+        Returns:
+            List of tuples (sub_chunk_text, token_count)
+        """
+        # Encode sentence to tokens
+        tokens = self.encoding.encode(sentence)
+        
+        # Calculate overlap in tokens based on chunk_overlap_sentences
+        # If no sentence overlap is configured, use no token overlap
+        if self.chunk_overlap_sentences == 0:
+            overlap_tokens = 0
+        else:
+            # Estimate average sentence tokens as a proportion of chunk_size
+            # Typical sentences are ~10-20 tokens, so we use chunk_size // 10
+            # as a reasonable estimate for average sentence size
+            estimated_sentence_tokens = max(1, self.chunk_size // 10)
+            
+            # Calculate overlap: number of sentences * estimated tokens per sentence
+            overlap_tokens = self.chunk_overlap_sentences * estimated_sentence_tokens
+            
+            # Cap overlap to reasonable limits to prevent issues
+            overlap_tokens = min(
+                overlap_tokens,
+                int(self.chunk_size * 0.25),  # Max 25% of chunk size
+                self.chunk_size - 1  # Ensure overlap < chunk_size
+            )
+        
+        sub_chunks = []
+        start = 0
+        
+        while start < len(tokens):
+            end = start + self.chunk_size
+            chunk_tokens = tokens[start:end]
+            
+            # Decode back to text
+            chunk_text = self.encoding.decode(chunk_tokens)
+            token_count = len(chunk_tokens)
+            
+            sub_chunks.append((chunk_text, token_count))
+            
+            # Move to next chunk with overlap
+            if end >= len(tokens):
+                break
+            
+            start = end - overlap_tokens
+            # Prevent infinite loop if overlap is too large
+            if start >= len(tokens):
+                break
+        
+        return sub_chunks
 
     def _split_sentences(self, text: str) -> List[str]:
         """

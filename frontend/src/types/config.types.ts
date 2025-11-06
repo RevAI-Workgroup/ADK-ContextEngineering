@@ -100,7 +100,7 @@ export const createDefaultConfig = (): ContextEngineeringConfig => ({
     chunk_size: 512,
     chunk_overlap: 50,
     top_k: 5,
-    similarity_threshold: 0.2,
+    similarity_threshold: 0.75,
     embedding_model: 'sentence-transformers/all-MiniLM-L6-v2',
   },
   rag_tool: {
@@ -108,7 +108,7 @@ export const createDefaultConfig = (): ContextEngineeringConfig => ({
     chunk_size: 512,
     chunk_overlap: 50,
     top_k: 5,
-    similarity_threshold: 0.2,
+    similarity_threshold: 0.75,
     embedding_model: 'sentence-transformers/all-MiniLM-L6-v2',
     tool_name: 'search_knowledge_base',
     tool_description: 'Search the knowledge base for relevant information about a specific topic or question',

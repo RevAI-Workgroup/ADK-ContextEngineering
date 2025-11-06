@@ -5,11 +5,13 @@ This module provides embedding generation using sentence-transformers
 for document and query vectorization.
 """
 
-from typing import List, Optional
+from typing import List, Optional, Dict
 import logging
+import threading
+from collections import OrderedDict
 from sentence_transformers import SentenceTransformer
 import numpy as np
-from functools import lru_cache
+from src.core.config import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +51,7 @@ class EmbeddingService:
             raise
 
         # Cache for embeddings (LRU cache)
-        self._embedding_cache = {}
+        self._embedding_cache = OrderedDict()
         self._cache_hits = 0
         self._cache_misses = 0
 
@@ -69,6 +71,8 @@ class EmbeddingService:
 
         # Check cache
         if text in self._embedding_cache:
+            # Move to end (most recently used)
+            self._embedding_cache.move_to_end(text)
             self._cache_hits += 1
             return self._embedding_cache[text]
 
@@ -80,9 +84,10 @@ class EmbeddingService:
             # Update cache (with LRU eviction)
             self._cache_misses += 1
             if len(self._embedding_cache) >= self.cache_size:
-                # Remove oldest entry (simple FIFO for now)
-                self._embedding_cache.pop(next(iter(self._embedding_cache)))
+                # Remove least-recently-used entry (first item)
+                self._embedding_cache.popitem(last=False)
 
+            # Insert new entry at end (most recently used)
             self._embedding_cache[text] = embedding_list
 
             return embedding_list
@@ -112,6 +117,8 @@ class EmbeddingService:
 
         for i, text in enumerate(texts):
             if text in self._embedding_cache:
+                # Move to end (most recently used)
+                self._embedding_cache.move_to_end(text)
                 results[i] = self._embedding_cache[text]
                 self._cache_hits += 1
             else:
@@ -133,9 +140,13 @@ class EmbeddingService:
                     embedding_list = embedding.tolist()
                     results[uncached_indices[i]] = embedding_list
 
-                    # Update cache
-                    if len(self._embedding_cache) < self.cache_size:
-                        self._embedding_cache[text] = embedding_list
+                    # Update cache (with LRU eviction)
+                    if len(self._embedding_cache) >= self.cache_size:
+                        # Remove least-recently-used entry (first item)
+                        self._embedding_cache.popitem(last=False)
+                    
+                    # Insert new entry at end (most recently used)
+                    self._embedding_cache[text] = embedding_list
 
                 self._cache_misses += len(uncached_texts)
 
@@ -177,13 +188,6 @@ class EmbeddingService:
             "hit_rate": hit_rate
         }
 
-    def clear_cache(self) -> None:
-        """Clear the embedding cache."""
-        self._embedding_cache.clear()
-        self._cache_hits = 0
-        self._cache_misses = 0
-        logger.info("Embedding cache cleared")
-
     def compute_similarity(
         self,
         text1: str,
@@ -199,7 +203,7 @@ class EmbeddingService:
             metric: Similarity metric ("cosine" or "dot")
 
         Returns:
-            Similarity score (0-1 for cosine, unbounded for dot)
+            Similarity score (-1 to 1 for cosine, unbounded for dot)
         """
         emb1 = np.array(self.embed_text(text1))
         emb2 = np.array(self.embed_text(text2))
@@ -232,30 +236,135 @@ class EmbeddingService:
             "cache_stats": self.get_cache_stats()
         }
 
+    def cleanup(self) -> None:
+        """
+        Clean up resources used by this embedding service.
+        
+        Releases the model and clears caches. Should be called when
+        the service is being evicted from the cache.
+        """
+        try:
+            # Clear embedding cache
+            self._embedding_cache.clear()
+            # Note: SentenceTransformer models don't have explicit cleanup,
+            # but clearing references helps with garbage collection
+            self.model = None
+            logger.info(f"Cleaned up EmbeddingService for model: {self.model_name}")
+        except Exception as e:
+            logger.warning(f"Error during EmbeddingService cleanup: {e}", exc_info=True)
 
-# Global embedding service instance (singleton pattern)
-_global_embedding_service: Optional[EmbeddingService] = None
+
+# Multi-instance singleton pattern: one instance per model name
+# This prevents stale references when different models are requested
+# Thread-safe with bounded LRU cache for model instances
+_embedding_services: OrderedDict[str, "EmbeddingService"] = OrderedDict()
+_services_lock = threading.Lock()
+
+# Default max models cache size (can be overridden via config)
+_DEFAULT_MAX_MODELS = 5
 
 
 def get_embedding_service(
     model_name: str = "sentence-transformers/all-MiniLM-L6-v2"
 ) -> EmbeddingService:
     """
-    Get global embedding service instance (singleton pattern).
+    Get embedding service instance (singleton per model name).
+    
+    Maintains a separate singleton instance for each model name to prevent
+    stale references. Thread-safe with bounded LRU cache eviction.
+    
+    When the cache is at capacity, the least-recently-used model is evicted
+    and its resources are cleaned up before creating a new instance.
 
     Args:
         model_name: Name of the embedding model
 
     Returns:
-        Global EmbeddingService instance
+        EmbeddingService instance for the requested model (singleton per model)
     """
-    global _global_embedding_service
-    if _global_embedding_service is None:
-        _global_embedding_service = EmbeddingService(model_name=model_name)
-    return _global_embedding_service
+    global _embedding_services, _services_lock
+    
+    with _services_lock:
+        # Check if instance exists and move to end (most recently used)
+        if model_name in _embedding_services:
+            _embedding_services.move_to_end(model_name)
+            return _embedding_services[model_name]
+        
+        # Get max models from config or use default
+        try:
+            config = get_config()
+            max_models = config.get("retrieval.embeddings.max_models", _DEFAULT_MAX_MODELS)
+        except Exception as e:
+            logger.warning(f"Failed to load config, using default max_models: {e}")
+            max_models = _DEFAULT_MAX_MODELS
+        
+        # Evict least-recently-used if at capacity
+        if len(_embedding_services) >= max_models:
+            # Remove oldest entry (first item in OrderedDict)
+            evicted_name, evicted_service = _embedding_services.popitem(last=False)
+            logger.info(
+                f"Evicting least-recently-used EmbeddingService for model: {evicted_name} "
+                f"(cache at capacity: {max_models})"
+            )
+            try:
+                evicted_service.cleanup()
+            except Exception as e:
+                logger.warning(f"Error cleaning up evicted service: {e}", exc_info=True)
+        
+        # Create and cache new instance for this model
+        logger.info(f"Creating new EmbeddingService instance for model: {model_name}")
+        service = EmbeddingService(model_name=model_name)
+        _embedding_services[model_name] = service
+        # Move to end to mark as most recently used
+        _embedding_services.move_to_end(model_name)
+        
+        return service
 
 
-def reset_embedding_service() -> None:
-    """Reset the global embedding service (useful for testing)."""
-    global _global_embedding_service
-    _global_embedding_service = None
+def reset_embedding_service(model_name: Optional[str] = None) -> None:
+    """
+    Reset embedding service instance(s) (useful for testing).
+    
+    Thread-safe operation that cleans up resources before removing instances.
+    
+    Args:
+        model_name: If provided, reset only this model's instance.
+                    If None, reset all instances.
+    """
+    global _embedding_services, _services_lock
+    
+    with _services_lock:
+        if model_name is None:
+            # Reset all instances with cleanup
+            for service in _embedding_services.values():
+                try:
+                    service.cleanup()
+                except Exception as e:
+                    logger.warning(f"Error cleaning up service during reset: {e}", exc_info=True)
+            _embedding_services.clear()
+            logger.info("Reset all EmbeddingService instances")
+        elif model_name in _embedding_services:
+            # Reset specific instance with cleanup
+            service = _embedding_services.pop(model_name)
+            try:
+                service.cleanup()
+            except Exception as e:
+                logger.warning(f"Error cleaning up service during reset: {e}", exc_info=True)
+            logger.info(f"Reset EmbeddingService instance for model: {model_name}")
+        else:
+            logger.warning(f"No EmbeddingService instance found for model: {model_name}")
+
+
+def get_all_embedding_services() -> Dict[str, "EmbeddingService"]:
+    """
+    Get all active embedding service instances.
+    
+    Thread-safe operation that returns a snapshot of current instances.
+    
+    Returns:
+        Dictionary mapping model names to their EmbeddingService instances
+    """
+    global _embedding_services, _services_lock
+    
+    with _services_lock:
+        return dict(_embedding_services)

@@ -43,7 +43,7 @@ def search_knowledge_base(query: str, top_k: int = 5) -> str:
         results = vector_store.search(
             query=query,
             top_k=top_k,
-            similarity_threshold=0.2  # Use same threshold as naive RAG
+            similarity_threshold=0.75  # Conservative industry-standard for ensuring relevant results
         )
 
         if not results:

@@ -244,7 +244,7 @@ class ADKAgentWrapper:
                 enriched_message = message
             
             # Get the appropriate runner for the specified model
-            runner = self._get_or_create_runner(model)
+            runner = self._get_or_create_runner(model, config)
             
             # Track the resolved model (use "default" if model is None)
             resolved_model = model if model else "default"

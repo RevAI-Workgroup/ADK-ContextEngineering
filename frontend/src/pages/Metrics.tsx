@@ -10,7 +10,7 @@ import { Label } from '../components/ui/label'
 import { Checkbox } from '../components/ui/checkbox'
 import { RefreshCw, TrendingUp, BarChart3, Filter } from 'lucide-react'
 import { isMetricBetterWhenHigher, formatTimestamp, RunComparison, RunRecord } from '../types/run.types'
-import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } from 'recharts'
 
 export function Metrics() {
   const { 
@@ -303,9 +303,11 @@ function RunComparisonCharts({ runComparison }: RunComparisonChartsProps) {
   }))
 
   // Get common metrics
-  const metricKeys = runComparison.metrics_comparison 
-    ? Object.keys(runComparison.metrics_comparison)
-    : []
+  const metricKeys = useMemo(() => {
+    return runComparison.metrics_comparison 
+      ? Object.keys(runComparison.metrics_comparison)
+      : []
+  }, [runComparison.metrics_comparison])
 
   // Technique impact data - calculate deltas from first run (baseline)
   interface TechniqueImpactItem {
@@ -321,31 +323,45 @@ function RunComparisonCharts({ runComparison }: RunComparisonChartsProps) {
     isPositive: boolean
   }
 
-  const techniqueImpactData = metricKeys.map(metricKey => {
-    const metricComparison = runComparison.metrics_comparison[metricKey]
-    if (!metricComparison || !metricComparison.values || metricComparison.values.length < 2) {
-      return null
-    }
+  const techniqueImpactData = useMemo(() => {
+    return metricKeys.map(metricKey => {
+      const metricComparison = runComparison.metrics_comparison[metricKey]
+      if (!metricComparison || !metricComparison.values || metricComparison.values.length < 2) {
+        return null
+      }
 
-    const baseline = metricComparison.values[0]
+      const baseline = metricComparison.values[0]
 
-    // Skip metrics where baseline is zero to avoid Infinity/NaN in percentage calculations
-    if (Math.abs(baseline) < 1e-9) {
-      return null
-    }
+      // Skip metrics where baseline is zero to avoid Infinity/NaN in percentage calculations
+      if (Math.abs(baseline) < 1e-9) {
+        return null
+      }
 
-    const deltas = metricComparison.values.map((value: number, index: number) => {
-      if (index === 0) return 0
-      const percentChange = ((value - baseline) / baseline) * 100
-      return percentChange
-    })
+      const deltas = metricComparison.values.map((value: number, index: number) => {
+        if (index === 0) return 0
+        const percentChange = ((value - baseline) / baseline) * 100
+        return percentChange
+      })
 
-    return {
-      metric: metricKey,
-      deltas,
-      values: metricComparison.values
-    }
-  }).filter((item): item is TechniqueImpactItem => item !== null)
+      return {
+        metric: metricKey,
+        deltas,
+        values: metricComparison.values
+      }
+    }).filter((item): item is TechniqueImpactItem => item !== null)
+  }, [metricKeys, runComparison.metrics_comparison])
+
+  // Compute chart data for Technique Impact chart with conditional coloring
+  const techniqueImpactChartData = useMemo(() => {
+    return techniqueImpactData.flatMap((item: TechniqueImpactItem): TechniqueImpactChartData[] => 
+      item.deltas.map((delta: number, index: number): TechniqueImpactChartData => ({
+        metric: item.metric,
+        run: `Run ${index + 1}`,
+        delta: delta,
+        isPositive: isMetricBetterWhenHigher(item.metric) ? delta > 0 : delta < 0
+      }))
+    ).filter((item: TechniqueImpactChartData) => item.run !== 'Run 1')
+  }, [techniqueImpactData])
 
   return (
     <div className="space-y-4">
@@ -451,14 +467,7 @@ function RunComparisonCharts({ runComparison }: RunComparisonChartsProps) {
           <CardContent>
             <ResponsiveContainer width="100%" height={400}>
               <BarChart
-                data={techniqueImpactData.flatMap((item: TechniqueImpactItem): TechniqueImpactChartData[] => 
-                  item.deltas.map((delta: number, index: number): TechniqueImpactChartData => ({
-                    metric: item.metric,
-                    run: `Run ${index + 1}`,
-                    delta: delta,
-                    isPositive: isMetricBetterWhenHigher(item.metric) ? delta > 0 : delta < 0
-                  }))
-                ).filter((item: TechniqueImpactChartData) => item.run !== 'Run 1')}
+                data={techniqueImpactChartData}
                 layout="vertical"
               >
                 <CartesianGrid strokeDasharray="3 3" />
@@ -466,7 +475,11 @@ function RunComparisonCharts({ runComparison }: RunComparisonChartsProps) {
                 <YAxis type="category" dataKey="metric" width={150} />
                 <Tooltip />
                 <Legend />
-                <Bar dataKey="delta" fill="hsl(var(--chart-1))" />
+                <Bar dataKey="delta">
+                  {techniqueImpactChartData.map((entry: TechniqueImpactChartData, index: number) => (
+                    <Cell key={`cell-${index}`} fill={entry.isPositive ? '#22c55e' : '#ef4444'} />
+                  ))}
+                </Bar>
               </BarChart>
             </ResponsiveContainer>
           </CardContent>

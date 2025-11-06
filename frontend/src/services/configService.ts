@@ -5,31 +5,62 @@
  */
 
 import { api } from './api'
-import { ContextEngineeringConfig, ConfigValidationResponse, ConfigPresetsResponse, createDefaultConfig } from '../types/config.types'
+import { ContextEngineeringConfig, ConfigValidationResponse, ConfigPresetsResponse, createDefaultConfig, NaiveRAGConfig } from '../types/config.types'
+
+/**
+ * Type guard to validate if an object matches NaiveRAGConfig structure
+ */
+function isValidNaiveRAGConfig(value: unknown): value is NaiveRAGConfig {
+  if (!value || typeof value !== 'object') {
+    return false
+  }
+
+  const obj = value as Record<string, unknown>
+
+  return (
+    typeof obj.enabled === 'boolean' &&
+    typeof obj.chunk_size === 'number' &&
+    typeof obj.chunk_overlap === 'number' &&
+    typeof obj.top_k === 'number' &&
+    typeof obj.similarity_threshold === 'number' &&
+    typeof obj.embedding_model === 'string'
+  )
+}
 
 /**
  * Normalize configuration to ensure backward compatibility
  * Handles migration from old 'rag' to 'naive_rag' structure
  */
-function normalizeConfig(config: any): ContextEngineeringConfig {
+function normalizeConfig(config: Partial<ContextEngineeringConfig> & { rag?: unknown }): ContextEngineeringConfig {
   const defaultConfig = createDefaultConfig()
 
+  // Create a copy to avoid mutating the input
+  const migratedConfig = { ...config }
+
   // Handle old 'rag' structure
-  if (config.rag && !config.naive_rag) {
-    config = {
-      ...config,
-      naive_rag: config.rag,
-      rag_tool: defaultConfig.rag_tool,
+  if (migratedConfig.rag && !migratedConfig.naive_rag) {
+    if (isValidNaiveRAGConfig(migratedConfig.rag)) {
+      migratedConfig.naive_rag = migratedConfig.rag
+      migratedConfig.rag_tool = defaultConfig.rag_tool
+      delete migratedConfig.rag
+    } else {
+      console.warn(
+        'Invalid RAG config structure detected during migration. Expected NaiveRAGConfig shape but got:',
+        migratedConfig.rag,
+        'Falling back to default naive_rag configuration.'
+      )
+      migratedConfig.naive_rag = defaultConfig.naive_rag
+      migratedConfig.rag_tool = defaultConfig.rag_tool
+      delete migratedConfig.rag
     }
-    delete config.rag
   }
 
   // Ensure all required fields exist
   return {
     ...defaultConfig,
-    ...config,
-    naive_rag: config.naive_rag || defaultConfig.naive_rag,
-    rag_tool: config.rag_tool || defaultConfig.rag_tool,
+    ...migratedConfig,
+    naive_rag: migratedConfig.naive_rag ?? defaultConfig.naive_rag,
+    rag_tool: migratedConfig.rag_tool ?? defaultConfig.rag_tool,
   }
 }
 
