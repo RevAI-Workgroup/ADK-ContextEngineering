@@ -403,18 +403,48 @@ async def get_metrics_comparison(
 # TOOLS ENDPOINTS
 # ============================================================================
 
-@tools_router.get("/tools", response_model=List[ToolInfo])
+@tools_router.post("/tools", response_model=List[ToolInfo])
 async def get_tools(
+    config: Optional[Dict[str, Any]] = None,
     adk_wrapper: ADKAgentWrapper = Depends(get_adk_wrapper)
 ):
     """
-    Get list of available tools for the ADK agent.
-    
+    Get list of available tools for the ADK agent based on configuration.
+
     Returns information about each tool including name, description,
-    and parameters.
+    and parameters. Tools list may vary based on enabled configuration.
+
+    Args:
+        config: Optional configuration dict to determine which tools are available
     """
     try:
-        tools = adk_wrapper.get_available_tools()
+        # Parse config if provided
+        context_config = None
+        if config:
+            try:
+                context_config = ContextEngineeringConfig.from_dict(config)
+            except (ValueError, TypeError, KeyError) as config_error:
+                logger.warning(f"Invalid config in get_tools, using default: {config_error}")
+
+        tools = adk_wrapper.get_available_tools(context_config)
+        return tools
+    except Exception as e:
+        logger.error(f"Error fetching tools: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@tools_router.get("/tools", response_model=List[ToolInfo])
+async def get_tools_legacy(
+    adk_wrapper: ADKAgentWrapper = Depends(get_adk_wrapper)
+):
+    """
+    Get list of available tools (legacy GET endpoint).
+
+    Returns base tools without configuration-dependent tools.
+    Use POST /api/tools with config for full tool list.
+    """
+    try:
+        tools = adk_wrapper.get_available_tools(None)
         return tools
     except Exception as e:
         logger.error(f"Error fetching tools: {e}", exc_info=True)

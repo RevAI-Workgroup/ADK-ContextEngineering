@@ -9,9 +9,11 @@ import { Button } from '../components/ui/button'
 import { Bot, Trash2, XCircle, ChevronDown, ChevronUp } from 'lucide-react'
 import { useChatContext } from '../contexts/ChatContext'
 import { modelsService } from '../services/modelsService'
+import { agentService } from '../services/agentService'
 import { useState, useEffect, useRef } from 'react'
 import { Alert, AlertDescription } from '../components/ui/alert'
 import { ContextEngineeringConfig } from '../types/config.types'
+import { Tool } from '../types/agent.types'
 
 export function Chat() {
   const { clearChat, messages, config, setConfig } = useChatContext()
@@ -23,8 +25,24 @@ export function Chat() {
   const [showRunHistory, setShowRunHistory] = useState(false)
   const [comparisonRunIds, setComparisonRunIds] = useState<string[]>([])
   const [showComparison, setShowComparison] = useState(false)
+  const [availableTools, setAvailableTools] = useState<Tool[]>([])
   const configPanelRef = useRef<HTMLDivElement>(null)
   const configButtonRef = useRef<HTMLButtonElement>(null)
+
+  // Fetch available tools when config changes
+  useEffect(() => {
+    const fetchTools = async () => {
+      try {
+        const tools = await agentService.getTools(config)
+        setAvailableTools(tools)
+      } catch (error) {
+        console.error('Failed to fetch tools:', error)
+        // Set default tools on error
+        setAvailableTools([])
+      }
+    }
+    fetchTools()
+  }, [config])
 
   // Auto-dismiss success messages after 5 seconds with proper cleanup
   useEffect(() => {
@@ -248,10 +266,13 @@ export function Chat() {
             {isToolsExpanded && (
               <CardContent className="pt-0">
                 <div className="flex flex-wrap gap-2">
-                  <ToolBadge name="calculate" />
-                  <ToolBadge name="count_words" />
-                  <ToolBadge name="get_current_time" />
-                  <ToolBadge name="analyze_text" />
+                  {availableTools.length > 0 ? (
+                    availableTools.map((tool) => (
+                      <ToolBadge key={tool.name} name={tool.name} description={tool.description} />
+                    ))
+                  ) : (
+                    <p className="text-sm text-muted-foreground">No tools available</p>
+                  )}
                 </div>
               </CardContent>
             )}
@@ -274,11 +295,15 @@ export function Chat() {
 
 interface ToolBadgeProps {
   name: string
+  description?: string
 }
 
-function ToolBadge({ name }: ToolBadgeProps) {
+function ToolBadge({ name, description }: ToolBadgeProps) {
   return (
-    <div className="px-2 py-1 rounded-md bg-secondary text-secondary-foreground">
+    <div
+      className="px-2 py-1 rounded-md bg-secondary text-secondary-foreground cursor-help"
+      title={description || name}
+    >
       <div className="text-xs font-medium">{name}</div>
     </div>
   )

@@ -31,10 +31,11 @@ export const agentService = {
   },
 
   /**
-   * Get list of available tools
+   * Get list of available tools based on current configuration
    */
-  async getTools(): Promise<Tool[]> {
-    const response = await api.get<Tool[]>('/api/tools')
+  async getTools(config?: ContextEngineeringConfig): Promise<Tool[]> {
+    // Use POST to send config and get tools dynamically
+    const response = await api.post<Tool[]>('/api/tools', config || {})
     return response.data
   },
 

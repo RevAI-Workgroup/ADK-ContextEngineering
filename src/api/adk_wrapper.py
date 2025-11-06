@@ -78,12 +78,15 @@ class ADKAgentWrapper:
             Hash string representing the config state
         """
         if not config:
+            logger.debug("Config is None, using 'no_config' hash")
             return "no_config"
 
         # Create a simple hash based on enabled techniques
         techniques = sorted(config.get_enabled_techniques())
         config_str = ",".join(techniques)
-        return hashlib.md5(config_str.encode()).hexdigest()[:8]
+        hash_value = hashlib.md5(config_str.encode()).hexdigest()[:8]
+        logger.debug(f"Config hash generated: {hash_value} from techniques: {techniques}")
+        return hash_value
 
     def _build_tools_list(self, config: Optional[ContextEngineeringConfig]) -> List:
         """
@@ -97,12 +100,20 @@ class ADKAgentWrapper:
         """
         # Start with base tools
         tools = list(TOOLS)
+        logger.debug(f"Base tools count: {len(tools)}, names: {[t.__name__ for t in tools]}")
 
         # Add RAG-as-tool if enabled
-        if config and config.rag_tool_enabled:
-            logger.info("Adding search_knowledge_base tool to agent")
-            tools.append(search_knowledge_base)
+        if config:
+            logger.debug(f"Config provided, checking rag_tool_enabled: {config.rag_tool_enabled}")
+            if config.rag_tool_enabled:
+                logger.info("✓ RAG-as-tool is ENABLED - Adding search_knowledge_base tool to agent")
+                tools.append(search_knowledge_base)
+            else:
+                logger.info("✗ RAG-as-tool is DISABLED - NOT adding search_knowledge_base tool")
+        else:
+            logger.debug("No config provided, using base tools only")
 
+        logger.info(f"Final tools list: {len(tools)} tools - {[t.__name__ for t in tools]}")
         return tools
 
     def _get_or_create_runner(
@@ -157,9 +168,25 @@ class ADKAgentWrapper:
             "time zone queries"
         )
 
-        # Add RAG capability to description if enabled
+        # Build custom instruction based on configuration
+        custom_instruction = INSTRUCTION
+
+        # Add RAG capability to description and enhanced instructions if enabled
         if config and config.rag_tool_enabled:
             agent_description += ", and searching the knowledge base for information"
+
+            # Enhance instructions with RAG-specific guidance
+            custom_instruction = (
+                f"{INSTRUCTION}\n\n"
+                "⚠️ IMPORTANT - Knowledge Base Search:\n"
+                "You have access to a 'search_knowledge_base' tool.\n"
+                "- Use it PROACTIVELY for ANY question that could benefit from documentation or data\n"
+                "- Use it BEFORE saying you don't have information\n"
+                "- Use it when users ask 'what', 'how', 'why', 'explain', or 'tell me about' anything\n"
+                "- Even for seemingly simple questions, the knowledge base might have relevant details\n"
+                "- If search returns no results, then you can say you don't have information\n\n"
+                "Strategy: When in doubt, search the knowledge base first!"
+            )
 
         agent_description += "."
 
@@ -171,7 +198,7 @@ class ADKAgentWrapper:
                 max_tokens=max_tokens
             ),
             description=agent_description,
-            instruction=INSTRUCTION,
+            instruction=custom_instruction,
             tools=tools
         )
 
@@ -293,7 +320,18 @@ class ADKAgentWrapper:
                             if hasattr(part, 'text') and part.text:
                                 text = part.text
                                 logger.info(f"[EVENT {idx}] Text: {text[:100]}")
-                                response_text = text
+
+                                # Filter out raw tool call XML/JSON from response
+                                # Remove <tool>...</tool> tags and their content
+                                cleaned_text = re.sub(r'<tool>.*?</tool>', '', text, flags=re.DOTALL)
+                                cleaned_text = cleaned_text.strip()
+
+                                # Only use non-empty cleaned text
+                                if cleaned_text:
+                                    response_text = cleaned_text
+                                else:
+                                    # If text was entirely tool calls, don't update response_text
+                                    logger.debug(f"[EVENT {idx}] Text was entirely tool calls, skipping")
 
                             # Check for function call (tool usage)
                             if hasattr(part, 'function_call'):
@@ -461,8 +499,8 @@ class ADKAgentWrapper:
         logger.info(f"Processing message with streaming (model: '{model or 'default'}'): {message[:50]}...")
         
         try:
-            # Get the appropriate runner for the specified model
-            runner = self._get_or_create_runner(model)
+            # Get the appropriate runner for the specified model and config
+            runner = self._get_or_create_runner(model, config)
             
             # Track the resolved model (use "default" if model is None)
             resolved_model = model if model else "default"
@@ -674,14 +712,17 @@ class ADKAgentWrapper:
         
         return response_data
     
-    def get_available_tools(self) -> List[Dict[str, Any]]:
+    def get_available_tools(self, config: Optional[ContextEngineeringConfig] = None) -> List[Dict[str, Any]]:
         """
         Get list of available tools from the ADK agent.
-        
+
+        Args:
+            config: Optional configuration to determine which tools are available
+
         Returns:
             List of tool information dictionaries
         """
-        # These are the tools from Phase 1
+        # Base tools that are always available
         tools = [
             {
                 "name": "calculate",
@@ -724,7 +765,25 @@ class ADKAgentWrapper:
                 }
             }
         ]
-        
+
+        # Add RAG-as-tool if enabled in configuration
+        if config and config.rag_tool_enabled:
+            tools.append({
+                "name": "search_knowledge_base",
+                "description": "Search the knowledge base for relevant documents. Use PROACTIVELY for any question that could benefit from documentation or external information. Always try this before saying you don't have information.",
+                "parameters": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query describing what information you need"
+                    },
+                    "top_k": {
+                        "type": "integer",
+                        "description": "Number of documents to retrieve (default: 5)",
+                        "default": 5
+                    }
+                }
+            })
+
         return tools
     
     def get_tool_info(self, tool_name: str) -> Optional[Dict[str, Any]]:
