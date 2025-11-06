@@ -1,0 +1,42 @@
+# OpenTelemetry Tracing Configuration
+
+tracing:
+  # Service identification
+  service_name: "context-engineering-sandbox"
+  service_version: "1.5.0"
+  
+  # Exporter configuration
+  # Options: "console" or "otlp"
+  exporter_type: "otlp"
+  
+  # OTLP endpoint configuration
+  # 
+  # RECOMMENDED: Use OpenTelemetry Collector architecture:
+  #   Application → OTLP Collector → Tempo (traces) + Prometheus/Grafana (metrics)
+  #
+  # Example setup:
+  #   1. Deploy OTLP Collector (e.g., port 4317)
+  #   2. Set otlp_endpoint to Collector: "otlp-collector-host:4317"
+  #   3. Collector routes traces to Tempo and metrics to Prometheus
+  #
+  # DIRECT: Point directly to Tempo (traces only, metrics will use console):
+  #   otlp_endpoint: "tempo-host:4333"
+  #   metrics_exporter_type: "console"  # Tempo doesn't support metrics
+  #
+  # For gRPC: just "host:port" (no http:// prefix)
+  # Example: "localhost:4317" for gRPC or "http://localhost:4318" for HTTP
+  otlp_endpoint: "http://51.210.255.198:4333"
+  otlp_insecure: true
+  
+  # Sampling rate (0.0 to 1.0)
+  # 1.0 = sample all traces, 0.5 = sample 50% of traces
+  sampling_rate: 1.0
+  
+  # Metrics export configuration
+  # Both traces and metrics sent to OTLP Collector
+  # Collector routes: traces → Tempo, metrics → Prometheus/Grafana
+  metrics_exporter_type: "otlp"  # Options: "otlp" or "console"
+  # metrics_endpoint defaults to same as otlp_endpoint when not specified (OTLP Collector pattern)
+  # metrics_endpoint: "51.210.255.198:4333"  # Uncomment to use different endpoint
+  metrics_otlp_insecure: true
+  metrics_export_interval_ms: 5000
