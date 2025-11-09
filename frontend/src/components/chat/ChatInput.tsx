@@ -39,9 +39,8 @@ export function ChatInput({
     const file = e.target.files?.[0]
     if (file && onFileUpload) {
       // Validate file type
-      const allowedExtensions = ['.txt', '.md']
-      const fileExtension = '.' + file.name.split('.').pop()?.toLowerCase()
-      if (!allowedExtensions.includes(fileExtension)) {
+      const fileName = file.name.toLowerCase()
+      if (!fileName.endsWith('.txt') && !fileName.endsWith('.md')) {
         alert('Please upload a .txt or .md file')
         return
       }

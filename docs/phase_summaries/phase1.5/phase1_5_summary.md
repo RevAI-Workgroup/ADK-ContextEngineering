@@ -273,7 +273,7 @@ uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000
 ```bash
 cd frontend
 
-# Install dependencies (requires Node.js 18+)
+# Install dependencies (requires Node.js 24.x — Active LTS)
 npm install
 
 # Start development server

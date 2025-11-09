@@ -10,14 +10,24 @@ interface ToolOutputDisplayProps {
 }
 
 export function ToolOutputDisplay({ toolCalls }: ToolOutputDisplayProps) {
-  // Start expanded by default to show tool information
-  const [isExpanded, setIsExpanded] = useState(true)
+  // Start collapsed by default
+  const [isExpanded, setIsExpanded] = useState(false)
 
   return (
     <Card className={cn('border border-amber-200 bg-amber-50')}>
       <CardHeader
         className="p-3 cursor-pointer"
+        role="button"
+        tabIndex={0}
+        aria-expanded={isExpanded}
+        aria-label="Toggle tool calls"
         onClick={() => setIsExpanded(!isExpanded)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            setIsExpanded(!isExpanded)
+          }
+        }}
       >
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">

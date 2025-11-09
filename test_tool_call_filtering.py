@@ -48,9 +48,12 @@ def test_tool_call_filtering():
         print(f"  {response_text}")
 
         # Check if raw tool calls appear in response
-        if '<tool>' in response_text or '</tool>' in response_text:
+        # Check for tool call XML pattern more precisely
+        import re
+        if re.search(r'<tool[>\s]|</tool>', response_text):
             print("\n  ✗ FAIL: Raw tool call XML found in response!")
             print("  The filtering is not working correctly.")
+            raise AssertionError("Raw tool call XML found in response - filtering failed")
         else:
             print("\n  ✓ PASS: No raw tool call XML in response")
             print("  The filtering is working correctly!")

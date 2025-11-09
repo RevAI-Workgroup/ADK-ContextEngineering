@@ -7,13 +7,14 @@ Users were experiencing "Connection lost. Please check your network and try agai
 ## Root Causes Identified
 
 ### 1. **Session Service Method Mismatch** (Primary Issue)
-**Location**: `src/api/adk_wrapper.py` line 528-548
+**Location**: `src/api/adk_wrapper.py` line 708-730
 
-The `process_message_stream_tokens()` method was calling async methods that don't exist on `InMemorySessionService`:
-- Called: `await self.session_service.get_session()`
-- Should call: `await self.session_service.get_session()` (which EXISTS, see `_run_agent_async` method)
+The `process_message_stream_tokens()` method was calling a synchronous or non-existent method variant instead of the async method:
+- **Incorrect call**: `self.session_service.get_session_sync()` or a missing awaitable method that prevented proper async/await handling
+- **Correct call**: `await self.session_service.get_session()` (as used by `_run_agent_async()` method at line 577)
+- **Impact**: Calling the wrong (non-async or non-existent) method prevented awaiting the session retrieval, causing the async streaming connection to drop before session initialization completed
 
-However, the implementation now matches the working `_run_agent_async()` pattern which uses the service's async interface correctly.
+The implementation now matches the working `_run_agent_async()` pattern which properly awaits the async session service methods.
 
 ### 2. **Insufficient Error Handling**
 The streaming loop lacked comprehensive error catching, causing uncaught exceptions to close the WebSocket without sending error events to the client.
@@ -160,8 +161,7 @@ useEffect(() => {
 ### 1. Restart Backend
 ```bash
 # Stop the current backend (Ctrl+C if running in terminal)
-# Then restart:
-cd /Users/nektar/Project/ADK-ContextEngineering
+# Then restart from the project root:
 source venv/bin/activate
 python -m uvicorn src.api.main:app --reload --port 8000 --log-level debug
 ```

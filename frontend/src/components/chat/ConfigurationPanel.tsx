@@ -139,7 +139,7 @@ export function ConfigurationPanel({ config, onConfigChange, className }: Config
               className="h-7 px-2 text-xs"
             >
               <AlertCircle className="h-3 w-3 mr-1" />
-              Validate
+              Save
             </Button>
             <Button 
               variant="outline" 

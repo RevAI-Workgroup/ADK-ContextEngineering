@@ -219,18 +219,56 @@ Get a specific run by ID.
 
 Clear all run history.
 
+**⚠️ Warning:** This is a **destructive operation** that permanently deletes all stored run history. This action cannot be undone.
+
+**Authorization:** 
+- **Current Status:** No authentication or authorization is currently implemented. The endpoint is accessible to anyone with network access to the API.
+- **Recommended:** This endpoint should require admin-level authentication. See [Security Considerations](#security-considerations) section for implementation recommendations.
+
 **Request Body:** None
 
 **Response:**
 ```json
 {
   "success": true,
-  "message": "Run history cleared"
+  "message": "Run history cleared successfully",
+  "timestamp": "2025-11-05T10:30:00Z"
 }
 ```
 
 **Status Codes:**
 - `200 OK`: Success
+- `401 Unauthorized`: Authentication required (when auth is implemented)
+- `403 Forbidden`: Insufficient permissions (when auth is implemented)
+- `500 Internal Server Error`: Server error during deletion
+
+**Audit Logging:**
+- All clear operations are logged at INFO level with timestamp
+- Logs include: operation type, timestamp, and success/failure status
+- **Recommendation:** Enhance logging to include:
+  - User/principal identifier (when auth is implemented)
+  - IP address of requester
+  - Number of records deleted
+  - Backup/export recommendation before deletion
+
+**Safety Recommendations:**
+1. **Confirmation Step:** Consider requiring a confirmation parameter or two-step process:
+   ```json
+   {
+     "confirm": true,
+     "dry_run": false
+   }
+   ```
+2. **Dry-Run Mode:** Implement a `dry_run` parameter to preview what would be deleted without actually deleting:
+   ```json
+   {
+     "dry_run": true
+   }
+   ```
+   Response would include count of records that would be deleted.
+3. **Backup Before Delete:** Consider automatically exporting run history before clearing (or requiring explicit backup first).
+4. **Rate Limiting:** Implement rate limiting to prevent accidental or malicious repeated calls.
+5. **Admin-Only Access:** Restrict this endpoint to admin users only when authentication is implemented.
 
 ---
 
@@ -527,6 +565,90 @@ The frontend uses the following services:
 - Frontend caches configuration presets in localStorage
 - Run history is cached in memory and refreshed on demand
 - No caching for chat responses (always fresh)
+
+---
+
+## Security Considerations
+
+### Authentication and Authorization
+
+**Current Status:** The API currently operates without authentication or authorization mechanisms. All endpoints are publicly accessible to anyone with network access to the API server.
+
+**Recommended Implementation:**
+
+1. **Authentication:**
+   - Implement token-based authentication (JWT) or API key authentication
+   - Require authentication for all destructive operations
+   - Consider OAuth 2.0 or similar for production deployments
+
+2. **Authorization:**
+   - Implement role-based access control (RBAC)
+   - Define roles: `admin`, `user`, `readonly`
+   - Restrict destructive endpoints (e.g., `/api/runs/clear`) to admin users only
+
+3. **Destructive Operations:**
+   - Endpoints that modify or delete data should require elevated permissions
+   - Consider implementing confirmation workflows for high-impact operations
+   - Log all destructive operations with user context
+
+### Audit Logging
+
+**Current Implementation:**
+- Basic logging exists for operations (INFO level for success, ERROR for failures)
+- Logs include timestamps and operation types
+
+**Recommended Enhancements:**
+- Include user/principal identifier in all log entries
+- Log IP addresses and request metadata
+- Implement structured logging (JSON format) for easier analysis
+- Store audit logs separately from application logs
+- Implement log retention policies
+
+### Rate Limiting
+
+**Recommendation:** Implement rate limiting to prevent:
+- Accidental repeated calls to destructive endpoints
+- Denial of service attacks
+- Resource exhaustion
+
+Consider using:
+- Per-endpoint rate limits (stricter for destructive operations)
+- Per-user/IP rate limits
+- Token bucket or sliding window algorithms
+
+### Data Protection
+
+**Recommendations:**
+1. **Backup Before Delete:** For destructive operations, consider:
+   - Automatic backup before deletion
+   - Requiring explicit backup/export before allowing deletion
+   - Implementing soft-delete with recovery period
+
+2. **Input Validation:** All endpoints should validate:
+   - Request payloads (already implemented via Pydantic)
+   - Path and query parameters
+   - File uploads (if applicable)
+
+3. **CORS Configuration:** Current CORS allows localhost origins. For production:
+   - Restrict to specific trusted domains
+   - Review CORS headers carefully
+   - Consider using environment-specific CORS policies
+
+### Network Security
+
+**Recommendations:**
+1. **HTTPS:** Always use HTTPS in production (TLS 1.2+)
+2. **Network Isolation:** Consider running API behind reverse proxy (nginx, Traefik)
+3. **Firewall Rules:** Restrict access to API port from trusted networks only
+4. **API Gateway:** Consider using an API gateway for additional security layers
+
+### Security Best Practices
+
+1. **Environment Variables:** Store sensitive configuration (API keys, secrets) in environment variables, not in code
+2. **Dependency Management:** Regularly update dependencies and scan for vulnerabilities
+3. **Error Handling:** Avoid exposing sensitive information in error messages
+4. **Input Sanitization:** Sanitize all user inputs to prevent injection attacks
+5. **Regular Security Audits:** Conduct periodic security reviews and penetration testing
 
 ---
 

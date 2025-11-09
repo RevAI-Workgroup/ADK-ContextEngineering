@@ -200,11 +200,15 @@ is_reasoning_model = model and any(
 
 #### Adjusting Stream Speed
 
-Edit `src/api/adk_wrapper.py`, line ~566:
+Edit `src/api/adk_wrapper.py` — inside function `process_message_stream_tokens()` (line 837):
 
 ```python
-# Small delay to simulate realistic streaming
-await asyncio.sleep(0.01)  # Change this value (seconds)
+# Inside process_message_stream_tokens():
+# ... existing code ...
+stream_delay_seconds = 0.01  # 10ms delay to mimic incremental streaming cadence (line 706)
+
+# ... later in the function, inside the token streaming loop (line 837):
+await asyncio.sleep(stream_delay_seconds)  # Change stream_delay_seconds value (line 706) to adjust speed
 ```
 
 #### Customizing Token Chunking
@@ -329,6 +333,107 @@ Expected: Reasoning panel shows, then solution streams
 1. Toggle streaming off
 2. Check WebSocket connection
 3. Verify backend routing logic
+
+### Error Handling & Edge Cases
+
+#### WebSocket Drops Mid-Stream
+**Behavior**: Connection interruption during active streaming.
+
+**Implementation Guidance**:
+- **Mark message incomplete**: Set `isComplete: false` flag on the message object
+- **Retain partial content**: Preserve all accumulated tokens (reasoning + response) in message state
+- **Auto-reconnect**: Implement exponential backoff reconnection logic in WebSocket hook
+- **User resend option**: Show "Connection lost" indicator with "Resend" button that re-sends the original query
+
+**Example Pattern**:
+```typescript
+// On WebSocket close during streaming
+if (isStreaming && !isComplete) {
+  setMessageStatus(messageId, { incomplete: true, partialContent: accumulatedText });
+  showReconnectUI(messageId);
+}
+```
+
+#### Incomplete Reasoning/Response Buffers
+**Behavior**: Streaming stops before receiving `complete` event (timeout, error, or connection loss).
+
+**Implementation Guidance**:
+- **Retain accumulated text**: Store all tokens received up to interruption point
+- **Treat as final fallback**: Display accumulated content as the final message when streaming stops unexpectedly
+- **Surface partial indicator**: Add visual badge (e.g., "Partial response" or "Incomplete") to inform users the message may be truncated
+
+**Example Pattern**:
+```typescript
+// On timeout or unexpected stream end
+if (accumulatedText && !receivedComplete) {
+  finalizeMessage(messageId, {
+    content: accumulatedText,
+    isPartial: true,
+    warning: "Response may be incomplete"
+  });
+}
+```
+
+#### Client Backpressure or Slow/Stop Receiving
+**Behavior**: Client cannot process incoming tokens fast enough (slow device, tab throttling, network congestion).
+
+**Implementation Guidance**:
+- **Backend continues streaming**: Server-side streaming continues regardless of client processing speed
+- **Event queue limits**: Implement bounded queue (e.g., max 100 pending events) to prevent memory bloat
+- **Buffering strategy**: Buffer incoming events and process in batches when client catches up
+- **Backpressure mechanisms**: 
+  - Pause WebSocket message processing when queue exceeds threshold
+  - Resume when queue drains below threshold
+  - Consider throttling: skip non-critical events if queue is full
+
+**Example Pattern**:
+```typescript
+const MAX_QUEUE_SIZE = 100;
+const eventQueue: TokenEvent[] = [];
+
+function processEventQueue() {
+  while (eventQueue.length > 0 && eventQueue.length < MAX_QUEUE_SIZE) {
+    const event = eventQueue.shift();
+    handleTokenEvent(event);
+  }
+  
+  if (eventQueue.length >= MAX_QUEUE_SIZE) {
+    // Backpressure: pause processing, log warning
+    console.warn('Event queue full, pausing processing');
+  }
+}
+```
+
+#### Model/Runtime Errors During Streaming
+**Behavior**: LLM API error, model timeout, or runtime exception occurs mid-stream.
+
+**Implementation Guidance**:
+- **Emit error event**: Backend sends `error` event type that stops streaming immediately
+- **Show accumulated content**: Display all tokens received before error occurred
+- **Error message display**: Append clear error message (e.g., "Generation stopped due to error: [details]")
+- **Retry/resend guidance**: Provide "Retry" button that re-sends the original query, and "Report Issue" option for persistent errors
+
+**Example Pattern**:
+```typescript
+// On error event
+if (event.type === 'error') {
+  stopStreaming(messageId);
+  setMessageError(messageId, {
+    content: accumulatedText,
+    error: event.error,
+    canRetry: true
+  });
+  showRetryButton(messageId);
+}
+```
+
+**Quick Implementation Checklist**:
+- [ ] Add reconnection logic with exponential backoff
+- [ ] Implement partial message persistence (localStorage or state)
+- [ ] Add event queue with size limits and backpressure handling
+- [ ] Create error event handler that preserves partial content
+- [ ] Add UI indicators for incomplete/partial/error states
+- [ ] Implement retry mechanism for failed streams
 
 ## Configuration
 

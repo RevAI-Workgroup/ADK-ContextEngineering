@@ -41,6 +41,7 @@ export interface Message {
   role: MessageRole
   content: string
   thinking?: string[]
+  reasoning?: string  // For reasoning tokens from models like o1
   toolCalls?: ToolCall[]
   timestamp: string
   model?: string
@@ -67,12 +68,28 @@ export interface ResponseEventData {
   tool_calls?: ToolCall[]
 }
 
-// Empty object for complete events
-export type CompleteEventData = Record<string, never>
+// Token streaming event data
+export interface TokenEventData {
+  token: string
+  cumulative_response: string
+}
+
+export interface ReasoningTokenEventData {
+  token: string
+  cumulative_reasoning: string
+}
+
+export interface CompleteEventData {
+  model?: string
+  reasoning_length?: number
+  response_length?: number
+}
 
 export interface ErrorEventData {
   error?: string
   message?: string
+  suggestion?: string
+  partial_response?: string
 }
 
 // Discriminated union for StreamEvent
@@ -90,6 +107,16 @@ export type StreamEvent =
   | {
       type: 'response'
       data: ResponseEventData
+      timestamp: string
+    }
+  | {
+      type: 'token'
+      data: TokenEventData
+      timestamp: string
+    }
+  | {
+      type: 'reasoning_token'
+      data: ReasoningTokenEventData
       timestamp: string
     }
   | {

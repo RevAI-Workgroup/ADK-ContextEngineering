@@ -112,6 +112,8 @@ export const formatTimestamp = (timestamp: string): string => {
 }
 
 // Helper to determine if metric is "better" when higher or lower
+// Uses exact matching and token-based matching to avoid false positives
+// with compound metric names (e.g., "latency_ms_reduction" should not match "latency_ms")
 export const isMetricBetterWhenHigher = (metricName: string): boolean => {
   const lowerIsBetter = [
     'latency_ms',
@@ -122,6 +124,21 @@ export const isMetricBetterWhenHigher = (metricName: string): boolean => {
     'cost',
   ]
   
-  return !lowerIsBetter.some(metric => metricName.toLowerCase().includes(metric))
+  const normalizedName = metricName.toLowerCase()
+  
+  // Check for exact match first
+  if (lowerIsBetter.includes(normalizedName)) {
+    return false
+  }
+  
+  // Split metric name into tokens by non-alphanumeric characters
+  const tokens = normalizedName.split(/[^a-z0-9]+/).filter(token => token.length > 0)
+  
+  // Check if any token exactly matches an entry (for compound names like "total_latency_ms")
+  // or if metric name ends with an entry (suffix matching)
+  // This avoids false positives: "latency_ms_reduction" won't match "latency_ms"
+  return !lowerIsBetter.some(metric => 
+    tokens.includes(metric) || normalizedName.endsWith(metric)
+  )
 }
 

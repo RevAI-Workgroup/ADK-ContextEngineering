@@ -239,9 +239,10 @@ async def chat_websocket(websocket: WebSocket):
                 })
                 continue
             
-            # Extract model from message data
+            # Extract model and streaming preference from message data
             selected_model = message_data.get("selectedModel")
-            logger.info(f"Processing WebSocket message with model: {selected_model or 'default'}")
+            enable_token_streaming = message_data.get("enableTokenStreaming", False)
+            logger.info(f"Processing WebSocket message with model: {selected_model or 'default'}, token_streaming: {enable_token_streaming}")
             
             # Parse config if provided
             context_config = None
@@ -288,25 +289,62 @@ async def chat_websocket(websocket: WebSocket):
                     })
                     continue
             
-            # Process message with streaming
-            async for event in adk_wrapper.process_message_stream(
-                message=message_data["message"],
-                session_id=message_data.get("session_id"),
-                model=selected_model,
-                config=context_config
-            ):
-                await websocket.send_json({
-                    "type": event["type"],
-                    "data": event["data"],
-                    "timestamp": datetime.now(timezone.utc).isoformat()
-                })
-            
-            # Send completion signal
-            await websocket.send_json({
-                "type": "complete",
-                "data": {},
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            })
+            # Process message with streaming (choose method based on token streaming preference)
+            try:
+                if enable_token_streaming:
+                    logger.info("Using token-level streaming mode")
+                    # Token streaming mode - yields individual tokens
+                    async for event in adk_wrapper.process_message_stream_tokens(
+                        message=message_data["message"],
+                        session_id=message_data.get("session_id"),
+                        model=selected_model,
+                        config=context_config
+                    ):
+                        try:
+                            await websocket.send_json({
+                                "type": event["type"],
+                                "data": event["data"],
+                                "timestamp": datetime.now(timezone.utc).isoformat()
+                            })
+                        except Exception as send_error:
+                            logger.error(f"Error sending event to WebSocket: {send_error}", exc_info=True)
+                            # If we can't send, break the loop
+                            break
+                else:
+                    logger.info("Using standard streaming mode")
+                    # Standard streaming mode - yields complete text chunks
+                    async for event in adk_wrapper.process_message_stream(
+                        message=message_data["message"],
+                        session_id=message_data.get("session_id"),
+                        model=selected_model,
+                        config=context_config
+                    ):
+                        try:
+                            await websocket.send_json({
+                                "type": event["type"],
+                                "data": event["data"],
+                                "timestamp": datetime.now(timezone.utc).isoformat()
+                            })
+                        except Exception as send_error:
+                            logger.error(f"Error sending event to WebSocket: {send_error}", exc_info=True)
+                            # If we can't send, break the loop
+                            break
+                
+                # Send completion signal (if not already sent by streaming method)
+                # Note: The streaming methods now send their own complete signals
+                logger.debug("WebSocket message processing complete")
+            except Exception as stream_error:
+                logger.error(f"Error in streaming loop: {stream_error}", exc_info=True)
+                # Try to send error to client before re-raising
+                try:
+                    await websocket.send_json({
+                        "type": "error",
+                        "data": {"error": f"Streaming error: {str(stream_error)}"},
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    })
+                except Exception:
+                    pass  # If we can't send error, connection is likely already closed
+                raise  # Re-raise to be caught by outer handler
             
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected")

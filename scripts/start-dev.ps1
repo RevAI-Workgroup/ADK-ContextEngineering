@@ -53,7 +53,7 @@ Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action { Cleanup }
 # Print header
 Write-Host ""
 Write-Host "╔═══════════════════════════════════════════╗" -ForegroundColor Cyan
-Write-Host "║   ADK Context Engineering - Dev Server   ║" -ForegroundColor Cyan
+Write-Host "║   ADK Context Engineering - Dev Server    ║" -ForegroundColor Cyan
 Write-Host "╚═══════════════════════════════════════════╝" -ForegroundColor Cyan
 Write-Host ""
 

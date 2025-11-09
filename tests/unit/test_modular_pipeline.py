@@ -275,6 +275,7 @@ class TestAllStubModules:
     
     @pytest.mark.parametrize("module_class,module_name", [
         (NaiveRAGModule, "NaiveRAG"),
+        (RAGToolModule, "RAGTool"),
         (CompressionModule, "Compression"),
         (RerankingModule, "Reranking"),
         (CachingModule, "Caching"),

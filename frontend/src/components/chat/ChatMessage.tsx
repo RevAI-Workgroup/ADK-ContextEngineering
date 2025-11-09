@@ -3,15 +3,17 @@ import { Card, CardContent } from '../ui/card'
 import { User, Bot, Clock, Cpu } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { ThinkingDisplay } from './ThinkingDisplay'
+import { CollapsibleReasoning } from './CollapsibleReasoning'
 import { ToolOutputDisplay } from './ToolOutputDisplay'
 import { RAGFeedback } from './RAGFeedback'
 import { Badge } from '../ui/badge'
 
 interface ChatMessageProps {
   message: Message
+  isStreaming?: boolean
 }
 
-export function ChatMessage({ message }: ChatMessageProps) {
+export function ChatMessage({ message, isStreaming = false }: ChatMessageProps) {
   const isUser = message.role === 'user'
 
   return (
@@ -61,12 +63,20 @@ export function ChatMessage({ message }: ChatMessageProps) {
           <RAGFeedback metadata={message.pipelineMetadata} />
         )}
 
+        {/* Collapsible Reasoning - Show for reasoning models with token streaming */}
+        {!isUser && (message.reasoning || (isStreaming && message.reasoning !== undefined)) && (
+          <CollapsibleReasoning 
+            reasoning={message.reasoning || ''} 
+            isStreaming={isStreaming}
+          />
+        )}
+
         {/* Tool Calls */}
         {!isUser && message.toolCalls && message.toolCalls.length > 0 && (
           <ToolOutputDisplay toolCalls={message.toolCalls} />
         )}
 
-        {/* Thinking Steps */}
+        {/* Thinking Steps (standard mode) */}
         {!isUser && message.thinking && message.thinking.length > 0 && (
           <ThinkingDisplay steps={message.thinking} />
         )}

@@ -71,12 +71,17 @@ try:
 
         # Test stats
         stats = vs.get_stats()
-        print(f"✓ Stats: {stats['total_documents']} docs, {stats['storage_size_mb']:.2f}MB")
+        stats = vs.get_stats()
+        total_docs = stats.get('total_documents', 0)
+        size_mb = stats.get('storage_size_mb', 0.0)
+        print(f"✓ Stats: {total_docs} docs, {size_mb:.2f}MB")
 
     except Exception as e:
         print(f"✗ Vector store test failed: {e}")
         import traceback
         traceback.print_exc()
+        sys.exit(1)
+        sys.exit(1)
     finally:
         # Always clean up temporary directory
         if temp_dir and os.path.exists(temp_dir):

@@ -43,7 +43,8 @@ def test_tool_swapping():
         data1 = response1.json()
         print(f"✓ Response received")
         print(f"  Model: {data1.get('model')}")
-        print(f"  Response preview: {data1['response'][:100]}...")
+        response_text = data1.get('response', '')
+        print(f"  Response preview: {response_text[:100]}...")
         if data1.get('tool_calls'):
             print(f"  Tool calls: {len(data1['tool_calls'])}")
     else:
@@ -81,7 +82,8 @@ def test_tool_swapping():
         data2 = response2.json()
         print(f"✓ Response received")
         print(f"  Model: {data2.get('model')}")
-        print(f"  Response preview: {data2['response'][:100]}...")
+        response_text = data2.get('response', '')
+        print(f"  Response preview: {response_text[:100]}...")
         if data2.get('tool_calls'):
             print(f"  Tool calls: {len(data2['tool_calls'])}")
             for tool in data2['tool_calls']:
@@ -91,7 +93,6 @@ def test_tool_swapping():
     else:
         print(f"✗ Error: {response2.status_code}")
         print(f"  {response2.text}")
-
     # Test 3: Send message with RAG-as-tool DISABLED again
     print("\n[TEST 3] Sending message with RAG-as-tool DISABLED again...")
 
@@ -109,7 +110,8 @@ def test_tool_swapping():
         data3 = response3.json()
         print(f"✓ Response received")
         print(f"  Model: {data3.get('model')}")
-        print(f"  Response preview: {data3['response'][:100]}...")
+        response_text = data3.get('response', '')
+        print(f"  Response preview: {response_text[:100]}...")
         if data3.get('tool_calls'):
             print(f"  Tool calls: {len(data3['tool_calls'])}")
     else:

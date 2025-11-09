@@ -20,6 +20,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
   const reconnectTimeoutRef = useRef<number | null>(null)
   const reconnectAttemptsRef = useRef(0)
   const isIntentionalCloseRef = useRef(false)
+  const pendingConnectionRef = useRef<Promise<void> | null>(null)
 
   // Reconnection config
   const INITIAL_RETRY_DELAY = 1000 // 1 second
@@ -41,15 +42,58 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
     }
   }, [])
 
-  const connect = useCallback(() => {
-    // Prevent duplicate connections - check if socket exists and is already open/connecting
+  const connect = useCallback((): Promise<void> => {
+    // If a connection attempt is already in-flight, return the pending promise
+    if (pendingConnectionRef.current) {
+      return pendingConnectionRef.current
+    }
+
+    // If socket already exists, handle based on its current state
     if (ws.current) {
       const state = ws.current.readyState
-      if (state === WebSocket.OPEN || state === WebSocket.CONNECTING) {
-        console.log('[WebSocket] Already connected or connecting, skipping duplicate connection')
-        return
+      if (state === WebSocket.OPEN) {
+        console.log('[WebSocket] Already connected')
+        setIsConnected(true)
+        setError(null)
+        return Promise.resolve()
       }
-      // If socket exists but is not OPEN/CONNECTING, clean it up first
+
+      if (state === WebSocket.CONNECTING) {
+        pendingConnectionRef.current = new Promise((resolve, reject) => {
+          const socket = ws.current
+          if (!socket) {
+            pendingConnectionRef.current = null
+            reject(new Error('WebSocket reference was lost during connection'))
+            return
+          }
+
+          const handleOpen = () => {
+            socket.removeEventListener('open', handleOpen)
+            socket.removeEventListener('error', handleError)
+            pendingConnectionRef.current = null
+            console.log('[WebSocket] Connected (awaiting existing connection)')
+            setIsConnected(true)
+            setError(null)
+            resolve()
+          }
+
+          const handleError = (event: Event) => {
+            socket.removeEventListener('open', handleOpen)
+            socket.removeEventListener('error', handleError)
+            pendingConnectionRef.current = null
+            console.error('[WebSocket] Error while waiting for connection:', event)
+            setError('WebSocket connection error')
+            reject(new Error('WebSocket connection error'))
+          }
+
+          socket.addEventListener('open', handleOpen, { once: true })
+          socket.addEventListener('error', handleError, { once: true })
+        })
+
+        return pendingConnectionRef.current
+      }
+
+      // For CLOSING or CLOSED states, clean up before creating a new connection
       cleanupWebSocket(ws.current)
       ws.current = null
     }
@@ -62,48 +106,68 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
 
     isIntentionalCloseRef.current = false
 
-    try {
-      console.log('[WebSocket] Creating new connection...')
-      ws.current = new WebSocket(`${WS_URL}/api/chat/ws`)
+    pendingConnectionRef.current = new Promise((resolve, reject) => {
+      try {
+        console.log('[WebSocket] Creating new connection...')
+        const socket = new WebSocket(`${WS_URL}/api/chat/ws`)
+        ws.current = socket
+        let hasResolved = false
 
-      ws.current.onopen = () => {
-        console.log('[WebSocket] Connected')
-        setIsConnected(true)
-        setError(null)
-        // Reset reconnection attempts on successful connection
-        reconnectAttemptsRef.current = 0
-        isIntentionalCloseRef.current = false
-      }
-
-      ws.current.onmessage = (event) => {
-        try {
-          const data: StreamEvent = JSON.parse(event.data)
-          console.log('[WebSocket] Message received:', data.type)
-          setEvents((prev) => [...prev, data])
-        } catch (err) {
-          console.error('[WebSocket] Error parsing message:', err)
+        socket.onopen = () => {
+          hasResolved = true
+          console.log('[WebSocket] Connected')
+          setIsConnected(true)
+          setError(null)
+          // Reset reconnection attempts on successful connection
+          reconnectAttemptsRef.current = 0
+          isIntentionalCloseRef.current = false
+          pendingConnectionRef.current = null
+          resolve()
         }
-      }
 
-      ws.current.onerror = (error) => {
-        console.error('[WebSocket] Error:', error)
-        setError('WebSocket connection error')
-      }
-
-      ws.current.onclose = (event) => {
-        console.log('[WebSocket] Disconnected', event.code, event.reason)
-        setIsConnected(false)
-        
-        // Schedule reconnection if not intentional close
-        if (!isIntentionalCloseRef.current) {
-          scheduleReconnect()
+        socket.onmessage = (event) => {
+          try {
+            const data: StreamEvent = JSON.parse(event.data)
+            console.log('[WebSocket] Message received:', data.type)
+            setEvents((prev) => [...prev, data])
+          } catch (err) {
+            console.error('[WebSocket] Error parsing message:', err)
+          }
         }
+
+        socket.onerror = (error) => {
+          console.error('[WebSocket] Error:', error)
+          setError('WebSocket connection error')
+          if (!hasResolved) {
+            pendingConnectionRef.current = null
+            reject(new Error('WebSocket connection error'))
+          }
+        }
+
+        socket.onclose = (event) => {
+          console.log('[WebSocket] Disconnected', event.code, event.reason)
+          setIsConnected(false)
+
+          if (!hasResolved && pendingConnectionRef.current) {
+            pendingConnectionRef.current = null
+            reject(new Error('WebSocket closed before opening'))
+          }
+
+          // Schedule reconnection if not intentional close
+          if (!isIntentionalCloseRef.current) {
+            scheduleReconnect()
+          }
+        }
+      } catch (err) {
+        console.error('[WebSocket] Connection error:', err)
+        setError('Failed to connect to WebSocket')
+        pendingConnectionRef.current = null
+        scheduleReconnect()
+        reject(err instanceof Error ? err : new Error('Failed to connect to WebSocket'))
       }
-    } catch (err) {
-      console.error('[WebSocket] Connection error:', err)
-      setError('Failed to connect to WebSocket')
-      scheduleReconnect()
-    }
+    })
+
+    return pendingConnectionRef.current
   }, [cleanupWebSocket])
 
   const scheduleReconnect = useCallback(() => {
@@ -140,6 +204,10 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
       reconnectTimeoutRef.current = null
     }
 
+    if (pendingConnectionRef.current) {
+      pendingConnectionRef.current = null
+    }
+
     // Clean up and close the WebSocket
     if (ws.current) {
       cleanupWebSocket(ws.current)
@@ -155,7 +223,8 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
     message: string, 
     model?: string,
     clearEvents?: boolean,
-    sessionId?: string
+    sessionId?: string,
+    enableTokenStreaming?: boolean
   ): boolean => {
     if (ws.current && ws.current.readyState === WebSocket.OPEN) {
       const payload = {
@@ -163,6 +232,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
         message,
         session_id: sessionId,
         selectedModel: model,
+        enableTokenStreaming: enableTokenStreaming || false,
       }
       ws.current.send(JSON.stringify(payload))
       
