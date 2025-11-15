@@ -1,3 +1,5 @@
+import { RAGMetadata, PipelineMetrics } from './message.types'
+
 export interface Tool {
   name: string
   description: string
@@ -19,12 +21,17 @@ export interface AgentResponse {
   metrics?: ResponseMetrics
   timestamp: string
   model?: string
+  pipeline_metadata?: RAGMetadata
+  pipeline_metrics?: PipelineMetrics
 }
+
 
 export interface ResponseMetrics {
   latency_ms: number
   token_count?: number
   timestamp: string
   session_id?: string
+  pipeline_metrics?: PipelineMetrics
+  enabled_techniques?: string[]
 }
 

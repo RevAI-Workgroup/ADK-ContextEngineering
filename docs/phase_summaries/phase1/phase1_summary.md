@@ -227,7 +227,7 @@ context_engineering_agent/
 - `src/core/tools/text_tools.py` - Text analysis tools
 - `src/core/tools/time_tools.py` - Timezone-aware time tool
 - `scripts/test_adk_agent.sh` - Interactive testing script
-- `docs/phase_summaries/phase1_summary.md` - This document
+- `docs/phase_summaries/phase1/phase1_summary.md` - This document
 
 ### Modified Files
 - `requirements.txt` - Updated from genai to ADK + LiteLLM

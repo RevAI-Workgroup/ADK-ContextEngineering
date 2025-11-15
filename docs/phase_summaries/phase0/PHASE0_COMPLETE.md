@@ -188,7 +188,7 @@ cat docs/phase_summaries/phase0_baseline_results.json
 2. ⏳ Install Ollama (if not already installed)
 3. ⏳ Download Qwen2.5 model: `ollama pull qwen2.5:latest`
 4. ⏳ Test Ollama: `ollama run qwen2.5`
-5. ⏳ Install Google ADK: `pip install google-genai`
+5. ⏳ Install Google ADK: `pip install google-adk`
 
 ### During Phase 1:
 - Create `src/core/adk_agent.py`

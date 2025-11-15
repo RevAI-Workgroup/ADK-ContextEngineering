@@ -1,5 +1,6 @@
 import { api } from './api'
 import { AgentResponse, Tool } from '../types/agent.types'
+import { ContextEngineeringConfig } from '../types/config.types'
 
 export const agentService = {
   /**
@@ -10,6 +11,7 @@ export const agentService = {
     sessionId?: string,
     includeThinking: boolean = true,
     model?: string | null,
+    config?: ContextEngineeringConfig,
     signal?: AbortSignal
   ): Promise<AgentResponse> {
     const response = await api.post<AgentResponse>(
@@ -19,6 +21,7 @@ export const agentService = {
         session_id: sessionId,
         include_thinking: includeThinking,
         model: model || undefined,
+        config: config || undefined,
       },
       {
         signal,
@@ -28,10 +31,11 @@ export const agentService = {
   },
 
   /**
-   * Get list of available tools
+   * Get list of available tools based on current configuration
    */
-  async getTools(): Promise<Tool[]> {
-    const response = await api.get<Tool[]>('/api/tools')
+  async getTools(config?: ContextEngineeringConfig): Promise<Tool[]> {
+    // Use POST to send config and get tools dynamically
+    const response = await api.post<Tool[]>('/api/tools', config || {})
     return response.data
   },
 

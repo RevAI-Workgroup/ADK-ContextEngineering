@@ -6,9 +6,35 @@ The agent definition is in context_engineering_agent/agent.py (single source of 
 """
 
 from .config import Config, get_config, reload_config
+from .context_config import (
+    ContextEngineeringConfig,
+    NaiveRAGConfig,
+    RAGToolConfig,
+    CompressionConfig,
+    RerankingConfig,
+    CachingConfig,
+    HybridSearchConfig,
+    MemoryConfig,
+    ConfigPreset,
+    get_default_config,
+    get_preset_configs,
+    get_preset_names,
+)
 
 __all__ = [
     'Config',
     'get_config',
     'reload_config',
+    'ContextEngineeringConfig',
+    'NaiveRAGConfig',
+    'RAGToolConfig',
+    'CompressionConfig',
+    'RerankingConfig',
+    'CachingConfig',
+    'HybridSearchConfig',
+    'MemoryConfig',
+    'ConfigPreset',
+    'get_default_config',
+    'get_preset_configs',
+    'get_preset_names',
 ]

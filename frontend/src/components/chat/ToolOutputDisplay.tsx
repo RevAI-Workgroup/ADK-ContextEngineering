@@ -1,64 +1,99 @@
-import { Wrench } from 'lucide-react'
+import { useState } from 'react'
+import { Wrench, ChevronDown, ChevronRight } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card'
 import { Badge } from '../ui/badge'
 import { ToolCall } from '../../types/agent.types'
+import { cn } from '@/lib/utils'
 
 interface ToolOutputDisplayProps {
   toolCalls: ToolCall[]
 }
 
 export function ToolOutputDisplay({ toolCalls }: ToolOutputDisplayProps) {
+  // Start collapsed by default
+  const [isExpanded, setIsExpanded] = useState(false)
+
   return (
-    <Card className="bg-accent/50">
-      <CardHeader className="pb-3">
-        <CardTitle className="flex items-center gap-2 text-sm">
-          <Wrench className="h-4 w-4 text-primary" />
-          Tool Calls
-          <Badge variant="secondary" className="ml-auto">
-            {toolCalls.length}
+    <Card className={cn('border border-amber-200 bg-amber-50')}>
+      <CardHeader
+        className="p-3 cursor-pointer"
+        role="button"
+        tabIndex={0}
+        aria-expanded={isExpanded}
+        aria-label="Toggle tool calls"
+        onClick={() => setIsExpanded(!isExpanded)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            setIsExpanded(!isExpanded)
+          }
+        }}
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            {isExpanded ? <ChevronDown className="h-4 w-4 text-gray-700" /> : <ChevronRight className="h-4 w-4 text-gray-700" />}
+            <div className="flex items-center gap-2 text-amber-600">
+              <Wrench className="h-4 w-4" />
+              <CardTitle className="text-sm font-medium">
+                Tool Calls
+              </CardTitle>
+            </div>
+          </div>
+          <Badge variant="secondary" className="text-xs bg-white">
+            {toolCalls.length} {toolCalls.length === 1 ? 'tool' : 'tools'}
           </Badge>
-        </CardTitle>
+        </div>
       </CardHeader>
-      <CardContent>
-        <div className="space-y-3">
-          {toolCalls?.map((toolCall, index) => (
-            <div key={toolCall.timestamp || `tool-${index}`} className="rounded-md bg-background p-3 space-y-2">
-              <div className="flex items-center gap-2">
-                <Badge variant="outline" className="font-mono text-xs">
-                  {toolCall.name}
-                </Badge>
+
+      {isExpanded && (
+        <CardContent className="p-3 pt-0 space-y-3">
+          {toolCalls.map((toolCall, index) => (
+            <div key={toolCall.timestamp || `tool-${index}`} className="bg-white p-3 rounded border border-amber-200">
+              <div className="flex items-start justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <Wrench className="h-4 w-4 text-amber-600" />
+                  <span className="text-sm font-medium text-gray-900">
+                    {toolCall.name}
+                  </span>
+                </div>
                 {toolCall.timestamp && (
-                  <span className="text-xs text-muted-foreground">
+                  <span className="text-xs text-gray-600">
                     {new Date(toolCall.timestamp).toLocaleTimeString()}
                   </span>
                 )}
               </div>
-              
-              <p className="text-xs text-muted-foreground">{toolCall.description}</p>
-              
+
+              {toolCall.description && (
+                <p className="text-sm text-gray-700 mb-2">{toolCall.description}</p>
+              )}
+
               {toolCall.parameters && (
-                <div className="mt-2">
-                  <div className="text-xs font-medium mb-1">Parameters:</div>
-                  <code className="text-xs block bg-muted p-2 rounded overflow-x-auto">
-                    {JSON.stringify(toolCall.parameters, null, 2)}
-                  </code>
+                <div className="mb-2">
+                  <div className="text-xs font-medium mb-1 text-gray-900">Parameters:</div>
+                  <div className="text-sm text-gray-800 bg-gray-50 p-2 rounded border border-gray-200 max-h-48 overflow-y-auto">
+                    <pre className="whitespace-pre-wrap font-mono text-xs">
+                      {JSON.stringify(toolCall.parameters, null, 2)}
+                    </pre>
+                  </div>
                 </div>
               )}
-              
+
               {toolCall.result !== undefined && (
-                <div className="mt-2">
-                  <div className="text-xs font-medium mb-1">Result:</div>
-                  <code className="text-xs block bg-muted p-2 rounded overflow-x-auto">
-                    {typeof toolCall.result === 'string' 
-                      ? toolCall.result 
-                      : JSON.stringify(toolCall.result, null, 2)}
-                  </code>
+                <div>
+                  <div className="text-xs font-medium mb-1 text-gray-900">Result:</div>
+                  <div className="text-sm text-gray-800 bg-gray-50 p-2 rounded border border-gray-200 max-h-48 overflow-y-auto">
+                    <pre className="whitespace-pre-wrap font-mono text-xs">
+                      {typeof toolCall.result === 'string'
+                        ? toolCall.result
+                        : JSON.stringify(toolCall.result, null, 2)}
+                    </pre>
+                  </div>
                 </div>
               )}
             </div>
           ))}
-        </div>
-      </CardContent>
+        </CardContent>
+      )}
     </Card>
   )
 }

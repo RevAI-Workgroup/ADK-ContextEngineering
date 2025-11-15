@@ -74,6 +74,30 @@ if [ ! -f venv/bin/activate ]; then
     exit 1
 fi
 
+# Check if workspace dependencies are installed
+if [ ! -d node_modules ]; then
+    log "ERROR" "Workspace dependencies not found!" "$RED"
+    log "ERROR" "Please run: pnpm install" "$RED"
+    log "ERROR" "(Run from project root, not from frontend directory)" "$RED"
+    exit 1
+fi
+
+# Warn if frontend has its own node_modules (incorrect workspace setup)
+if [ -d frontend/node_modules ]; then
+    log "WARNING" "Frontend has its own node_modules directory!" "$YELLOW"
+    log "WARNING" "This may indicate incorrect workspace setup." "$YELLOW"
+    log "WARNING" "Consider running: rm -rf frontend/node_modules && pnpm install" "$YELLOW"
+fi
+
+# Initialize Vector Store (if not already initialized)
+log "VECTOR STORE" "Checking ChromaDB initialization..." "$CYAN"
+if (source venv/bin/activate && python3 scripts/init_vector_store.py > /dev/null 2>&1); then
+    log "VECTOR STORE" "Vector store initialized successfully" "$CYAN"
+else
+    log "WARNING" "Vector store initialization failed (non-critical)" "$YELLOW"
+    log "WARNING" "You can manually initialize later with: source venv/bin/activate && python3 scripts/init_vector_store.py" "$YELLOW"
+fi
+
 # Start backend
 log "BACKEND" "Starting FastAPI server..." "$BLUE"
 (
