@@ -240,7 +240,6 @@ async def chat_websocket(websocket: WebSocket):
         "timestamp": "ISO-8601 timestamp"
     }
     """
-    import time
     
     await websocket.accept()
     logger.info("WebSocket connection established")
@@ -296,7 +295,7 @@ async def chat_websocket(websocket: WebSocket):
                     "message_length": len(message_data.get("message", ""))
                 }
             ) as span:
-                event_count=0
+                event_count = 0
                 # Parse config if provided
                 context_config = None
                 if message_data.get("config"):
@@ -353,6 +352,7 @@ async def chat_websocket(websocket: WebSocket):
                             model=selected_model,
                             config=context_config
                         ):
+                            event_count += 1
                             try:
                                 await websocket.send_json({
                                     "type": event["type"],
@@ -385,6 +385,14 @@ async def chat_websocket(websocket: WebSocket):
                                 # If we can't send, break the loop
                                 break
                     
+                    # Record latency
+                    latency_ms = (time.time() - start_time) * 1000
+                    span.set_attribute("latency_ms", latency_ms)
+                    record_metric("latency", latency_ms, {
+                         "endpoint": "/api/chat/ws",
+                         "model": selected_model or "default"
+                    })
+                    
                     # Send completion signal (if not already sent by streaming method)
                     # Note: The streaming methods now send their own complete signals
                     logger.debug("WebSocket message processing complete")
@@ -398,7 +406,7 @@ async def chat_websocket(websocket: WebSocket):
                             "timestamp": datetime.now(timezone.utc).isoformat()
                         })
                     except Exception:
-                        pass  # If we can't send error, connection is likely already closed
+                        logger.debug("Failed to send streaming error to WebSocket, connection likely closed")
                     raise  # Re-raise to be caught by outer handler
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected")
