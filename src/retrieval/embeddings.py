@@ -258,16 +258,22 @@ class EmbeddingService:
         Raises:
             RuntimeError: If the service has been cleaned up
         """
-        if self._is_cleaned:
-            raise RuntimeError(
-                f"EmbeddingService for model '{self.model_name}' has been cleaned up "
-                "and can no longer be used"
-            )
+        # Acquire lock to check cleaned status and access model safely
+        with self._lock:
+            if self._is_cleaned:
+                raise RuntimeError(
+                    f"EmbeddingService for model '{self.model_name}' has been cleaned up "
+                    "and can no longer be used"
+                )
+            # Read model.max_seq_length while holding lock to prevent race with cleanup()
+            max_seq_length = self.model.max_seq_length
         
+        # Release lock before calling get_cache_stats() (which acquires its own lock)
+        # and before returning the dict
         return {
             "model_name": self.model_name,
             "embedding_dimension": self.embedding_dim,
-            "max_sequence_length": self.model.max_seq_length,
+            "max_sequence_length": max_seq_length,
             "cache_stats": self.get_cache_stats()
         }
 
