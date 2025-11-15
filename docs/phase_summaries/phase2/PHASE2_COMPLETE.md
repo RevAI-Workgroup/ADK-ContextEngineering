@@ -170,16 +170,31 @@ Phase 3 will implement the **RAG Module** as the first concrete technique:
 
 ### 1. Start the Application
 
+**Prerequisites:**
+- Python 3.11+ with virtual environment set up
+- Node.js and npm/pnpm installed
+- Project dependencies installed (`pip install -r requirements.txt` and `npm install` in frontend/)
+
 ```bash
 # Terminal 1: Backend
-cd /Users/nektar/Project/ADK-ContextEngineering
-source venv/bin/activate
+# Navigate to project root (or set PROJECT_ROOT environment variable)
+cd $PROJECT_ROOT  # or cd /path/to/ADK-ContextEngineering
+
+# Activate virtual environment (create if needed: python -m venv venv)
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Run backend server from project root
 uvicorn src.api.main:app --reload --port 8000
 
 # Terminal 2: Frontend
-cd /Users/nektar/Project/ADK-ContextEngineering/frontend
-npm run dev
+# Navigate to frontend directory relative to project root
+cd $PROJECT_ROOT/frontend  # or cd frontend (if already in project root)
+
+# Start frontend development server
+npm run dev  # or pnpm dev, depending on your package manager
 ```
+
+**Note:** If `$PROJECT_ROOT` is not set, replace it with the absolute path to your project root directory, or navigate to the project root manually before running these commands.
 
 ### 2. Configure Techniques
 

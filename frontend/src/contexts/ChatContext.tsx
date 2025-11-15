@@ -13,12 +13,15 @@ interface ChatContextType {
   setSelectedModel: React.Dispatch<React.SetStateAction<string | null>>
   config: ContextEngineeringConfig
   setConfig: React.Dispatch<React.SetStateAction<ContextEngineeringConfig>>
+  tokenStreamingEnabled: boolean
+  setTokenStreamingEnabled: React.Dispatch<React.SetStateAction<boolean>>
   clearChat: () => void
 }
 
 const ChatContext = createContext<ChatContextType | undefined>(undefined)
 
 const CONFIG_STORAGE_KEY = 'context_engineering_config'
+const STREAMING_STORAGE_KEY = 'token_streaming_enabled'
 
 export function ChatProvider({ children }: { children: ReactNode }) {
   const [messages, setMessages] = useState<Message[]>([])
@@ -26,12 +29,45 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [errorMessage, setErrorMessage] = useState<string>('')
   const [selectedModel, setSelectedModel] = useState<string | null>(null)
   
+  // Initialize token streaming preference from localStorage
+  const [tokenStreamingEnabled, setTokenStreamingEnabled] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem(STREAMING_STORAGE_KEY)
+      return saved ? JSON.parse(saved) : false // Default: off
+    } catch (error) {
+      console.error('Failed to load token streaming preference:', error)
+      return false
+    }
+  })
+  
   // Initialize config from localStorage or use default
   const [config, setConfig] = useState<ContextEngineeringConfig>(() => {
     try {
       const savedConfig = localStorage.getItem(CONFIG_STORAGE_KEY)
       if (savedConfig) {
-        return JSON.parse(savedConfig)
+        const parsed = JSON.parse(savedConfig)
+
+        // Migration: Handle old 'rag' structure
+        if (parsed.rag && !parsed.naive_rag) {
+          console.log('Migrating old RAG config to naive_rag')
+          const defaultConfig = createDefaultConfig()
+          const { rag, ...rest } = parsed
+          return {
+            ...defaultConfig,
+            ...rest,
+            naive_rag: rag,
+            rag_tool: defaultConfig.rag_tool,
+          }
+        }
+
+        // Ensure all required fields exist
+        const defaultConfig = createDefaultConfig()
+        return {
+          ...defaultConfig,
+          ...parsed,
+          naive_rag: parsed.naive_rag || defaultConfig.naive_rag,
+          rag_tool: parsed.rag_tool || defaultConfig.rag_tool,
+        }
       }
     } catch (error) {
       console.error('Failed to load config from localStorage:', error)
@@ -47,6 +83,15 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       console.error('Failed to save config to localStorage:', error)
     }
   }, [config])
+
+  // Persist token streaming preference to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem(STREAMING_STORAGE_KEY, JSON.stringify(tokenStreamingEnabled))
+    } catch (error) {
+      console.error('Failed to save token streaming preference:', error)
+    }
+  }, [tokenStreamingEnabled])
 
   const clearChat = () => {
     setMessages([])
@@ -67,6 +112,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         setSelectedModel,
         config,
         setConfig,
+        tokenStreamingEnabled,
+        setTokenStreamingEnabled,
         clearChat,
       }}
     >

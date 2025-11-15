@@ -6,14 +6,20 @@ import { RunComparison } from '../components/chat/RunComparison'
 import { Card, CardContent, CardHeader } from '../components/ui/card'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
-import { Bot, Trash2, XCircle, ChevronDown, ChevronUp } from 'lucide-react'
+import { Switch } from '../components/ui/switch'
+import { Label } from '../components/ui/label'
+import { Bot, Trash2, XCircle, ChevronDown, ChevronUp, Zap } from 'lucide-react'
 import { useChatContext } from '../contexts/ChatContext'
 import { modelsService } from '../services/modelsService'
+import { agentService } from '../services/agentService'
 import { useState, useEffect, useRef } from 'react'
 import { Alert, AlertDescription } from '../components/ui/alert'
+import { ContextEngineeringConfig } from '../types/config.types'
+import { cn } from '../lib/utils'
+import { Tool } from '../types/agent.types'
 
 export function Chat() {
-  const { clearChat, messages, config, setConfig } = useChatContext()
+  const { clearChat, messages, config, setConfig, tokenStreamingEnabled, setTokenStreamingEnabled } = useChatContext()
   const [isClearing, setIsClearing] = useState(false)
   const [clearMessage, setClearMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
   const [rerunMessage, setRerunMessage] = useState<{ query: string } | null>(null)
@@ -22,8 +28,38 @@ export function Chat() {
   const [showRunHistory, setShowRunHistory] = useState(false)
   const [comparisonRunIds, setComparisonRunIds] = useState<string[]>([])
   const [showComparison, setShowComparison] = useState(false)
+  const [availableTools, setAvailableTools] = useState<Tool[]>([])
+  const [activeTools, setActiveTools] = useState<Set<string>>(new Set())
   const configPanelRef = useRef<HTMLDivElement>(null)
   const configButtonRef = useRef<HTMLButtonElement>(null)
+
+  // Fetch available tools when config changes
+  useEffect(() => {
+    let cancelled = false
+
+    const fetchTools = async () => {
+      try {
+        const tools = await agentService.getTools(config)
+        // Only update state if this effect hasn't been cancelled
+        if (!cancelled) {
+          setAvailableTools(tools)
+        }
+      } catch (error) {
+        console.error('Failed to fetch tools:', error)
+        // Only update state if this effect hasn't been cancelled
+        if (!cancelled) {
+          setAvailableTools([])
+        }
+      }
+    }
+
+    fetchTools()
+
+    // Cleanup function to mark this request as cancelled
+    return () => {
+      cancelled = true
+    }
+  }, [config])
 
   // Auto-dismiss success messages after 5 seconds with proper cleanup
   useEffect(() => {
@@ -60,6 +96,27 @@ export function Chat() {
       document.removeEventListener('mousedown', handleClickOutside)
     }
   }, [showConfigPanel])
+
+  // Track active tools from messages and auto-expand
+  useEffect(() => {
+    const toolsUsed = new Set<string>()
+    
+    // Collect all tools used in the current conversation
+    messages.forEach(message => {
+      if (message.toolCalls && message.toolCalls.length > 0) {
+        message.toolCalls.forEach(toolCall => {
+          toolsUsed.add(toolCall.name)
+        })
+      }
+    })
+
+    setActiveTools(toolsUsed)
+    
+    // Auto-expand if any tools are being used
+    if (toolsUsed.size > 0) {
+      setIsToolsExpanded(true)
+    }
+  }, [messages])
 
   const handleClearModels = async () => {
     setIsClearing(true)
@@ -103,7 +160,7 @@ export function Chat() {
     setShowComparison(true)
   }
 
-  const handleRerunWithConfig = (query: string, newConfig: any) => {
+  const handleRerunWithConfig = (query: string, newConfig: ContextEngineeringConfig) => {
     setConfig(newConfig)
     // Show notification to inform user that config has been applied
     setRerunMessage({ query })
@@ -125,7 +182,10 @@ export function Chat() {
         </Button>
         
         {showConfigPanel && (
-          <div ref={configPanelRef}>
+          <div 
+            ref={configPanelRef}
+            className="max-h-[calc(100vh-250px)] overflow-y-auto overflow-x-hidden"
+          >
             <ConfigurationPanel
               config={config}
               onConfigChange={setConfig}
@@ -154,12 +214,32 @@ export function Chat() {
         {/* Page Header */}
         <div className="w-full">
           <div className="flex items-center gap-2 mb-2">
-            <Bot className="h-8 w-8 text-primary" />
-            <h1 className="text-3xl font-bold">Agent Chat</h1>
-            <Badge variant="secondary" className="ml-2">
+            <Bot className="h-8 w-8 text-primary flex-shrink-0" />
+            <h1 className="text-3xl font-bold whitespace-nowrap">Agent Chat</h1>
+            <Badge variant="secondary" className="ml-2 flex-shrink-0">
               Phase 2
             </Badge>
-            <div className="ml-auto flex items-center gap-4">
+            <div className="ml-auto flex items-center gap-2 flex-shrink-0">
+              {/* Token Streaming Toggle */}
+              <div className="flex items-center gap-2 border rounded-lg px-3 py-2 bg-background hover:bg-accent/50 transition-colors">
+                <Zap className={cn(
+                  "h-4 w-4 transition-colors",
+                  tokenStreamingEnabled ? "text-yellow-500" : "text-muted-foreground"
+                )} />
+                <Label 
+                  htmlFor="token-streaming" 
+                  className="text-sm cursor-pointer font-medium"
+                  title="Enable real-time token streaming for faster visual feedback"
+                >
+                  Token Streaming
+                </Label>
+                <Switch
+                  id="token-streaming"
+                  checked={tokenStreamingEnabled}
+                  onCheckedChange={setTokenStreamingEnabled}
+                />
+              </div>
+              
               <ModelSelector />
               <Button
                 variant="outline"
@@ -247,10 +327,18 @@ export function Chat() {
             {isToolsExpanded && (
               <CardContent className="pt-0">
                 <div className="flex flex-wrap gap-2">
-                  <ToolBadge name="calculate" />
-                  <ToolBadge name="count_words" />
-                  <ToolBadge name="get_current_time" />
-                  <ToolBadge name="analyze_text" />
+                  {availableTools.length > 0 ? (
+                    availableTools.map((tool) => (
+                      <ToolBadge 
+                        key={tool.name} 
+                        name={tool.name} 
+                        description={tool.description}
+                        isActive={activeTools.has(tool.name)}
+                      />
+                    ))
+                  ) : (
+                    <p className="text-sm text-muted-foreground">No tools available</p>
+                  )}
                 </div>
               </CardContent>
             )}
@@ -258,7 +346,11 @@ export function Chat() {
         </div>
 
         {/* Chat Interface */}
-        <ChatInterface useRealtime={false} />
+        <div className="flex flex-col items-center w-full">
+          <div className="w-full max-w-4xl">
+            <ChatInterface useRealtime={tokenStreamingEnabled} />
+          </div>
+        </div>
       </div>
 
       {/* Run Comparison Modal */}
@@ -273,11 +365,19 @@ export function Chat() {
 
 interface ToolBadgeProps {
   name: string
+  isActive?: boolean
+  description?: string
 }
 
-function ToolBadge({ name }: ToolBadgeProps) {
+function ToolBadge({ name, isActive = false, description }: ToolBadgeProps) {
   return (
-    <div className="px-2 py-1 rounded-md bg-secondary text-secondary-foreground">
+    <div 
+      className={`px-2 py-1 rounded-md transition-colors duration-300 ${
+        isActive 
+          ? 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-100 border-2 border-green-500' 
+          : 'bg-secondary text-secondary-foreground'
+      }`}
+    >
       <div className="text-xs font-medium">{name}</div>
     </div>
   )

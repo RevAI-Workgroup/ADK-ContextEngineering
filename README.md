@@ -165,8 +165,21 @@ Conclusion: RAG improves accuracy significantly.
 ### Option A: Full Stack (Recommended)
 
 **Using the dev script:**
+
+**Linux/macOS:**
 ```bash
 ./start-dev.sh  # Starts backend + frontend with nice logging
+```
+
+**Windows:**
+```batch
+# PowerShell (recommended - handles Ctrl+C properly)
+.\scripts\start-dev.ps1
+
+# Batch script (alternative)
+.\scripts\start-dev.bat
+# Note: Press any key (not Ctrl+C) to stop cleanly
+# If you press Ctrl+C, run .\scripts\stop-dev.bat to clean up orphan processes
 ```
 
 **Using Docker:**
@@ -499,4 +512,4 @@ This is a research and demonstration project. Contributions are welcome!
 
 **Note:** This project uses local models for zero-cost experimentation. All metrics are reproducible on consumer hardware.
 
-*Last Updated: Phase 2 Complete - Modular Platform Infrastructure - 2025-11-05*
+*Last Updated: Phase 2 Complete - Modular Platform Infrastructure - 2025-11-09*

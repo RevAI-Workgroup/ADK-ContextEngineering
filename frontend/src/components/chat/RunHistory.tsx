@@ -283,7 +283,7 @@ function RunCard({ run, selected, onSelect, onRerun }: RunCardProps) {
               <p className="text-sm font-medium leading-tight">{queryPreview}</p>
             </div>
           </div>
-          <Button variant="ghost" size="icon" onClick={onRerun} title="Re-run with same config">
+          <Button variant="ghost" size="icon" onClick={onRerun} title="Re-run with same config" aria-label="Re-run with same config">
             <Play className="h-4 w-4" />
           </Button>
         </div>

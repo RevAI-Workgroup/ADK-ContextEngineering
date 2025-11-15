@@ -48,7 +48,8 @@ function startBackend() {
       });
     } else {
       // Unix (macOS/Linux): Use bash to source activation and run uvicorn
-      backendProcess = spawn('bash', ['-c', `source venv/bin/activate && export PYTHONPATH="${rootDir}:$PYTHONPATH" && uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000`], {
+      // Match start-dev.sh: export PYTHONPATH="${PYTHONPATH}:$(pwd)"
+      backendProcess = spawn('bash', ['-c', `source venv/bin/activate && export PYTHONPATH="$PYTHONPATH:${rootDir}" && uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000`], {
         cwd: rootDir,
         stdio: 'pipe'
       });
@@ -239,10 +240,45 @@ async function main() {
     if (fs.existsSync(frontendNodeModulesPath)) {
       log('WARNING', 'Frontend has its own node_modules directory!', colors.yellow);
       log('WARNING', 'This may indicate incorrect workspace setup.', colors.yellow);
-      const cleanupCmd = isWindows 
+      const cleanupCmd = isWindows
         ? 'rmdir /s /q frontend\\node_modules && pnpm install'
         : 'rm -rf frontend/node_modules && pnpm install';
       log('WARNING', `Consider running: ${cleanupCmd}`, colors.yellow);
+    }
+
+    // Initialize Vector Store (if not already initialized)
+    log('VECTOR STORE', 'Checking ChromaDB initialization...', colors.cyan);
+    try {
+      const initCmd = isWindows
+        ? `venv\\Scripts\\activate && python scripts\\init_vector_store.py`
+        : `source venv/bin/activate && python3 scripts/init_vector_store.py`;
+      
+      const shell = isWindows ? 'cmd' : 'bash';
+      const shellArgs = isWindows ? ['/c', initCmd] : ['-c', initCmd];
+      
+      const initProcess = spawn(shell, shellArgs, {
+        cwd: rootDir,
+        stdio: 'pipe',
+        shell: true
+      });
+
+      await new Promise((resolve) => {
+        initProcess.on('close', (code) => {
+          if (code === 0) {
+            log('VECTOR STORE', 'Vector store initialized successfully', colors.cyan);
+          } else {
+            log('WARNING', 'Vector store initialization failed (non-critical)', colors.yellow);
+            const activateCmd = isWindows 
+              ? 'venv\\Scripts\\activate && python scripts\\init_vector_store.py'
+              : 'source venv/bin/activate && python3 scripts/init_vector_store.py';
+            log('WARNING', `You can manually initialize later with: ${activateCmd}`, colors.yellow);
+          }
+          resolve();
+        });
+      });
+    } catch (error) {
+      log('WARNING', 'Vector store initialization failed (non-critical)', colors.yellow);
+      log('WARNING', `Error: ${error.message}`, colors.yellow);
     }
 
     // Start both servers

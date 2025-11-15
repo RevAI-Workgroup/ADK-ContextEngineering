@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Card } from '../ui/card'
 import { Alert, AlertDescription } from '../ui/alert'
 import { Button } from '../ui/button'
@@ -10,21 +10,23 @@ import { ToolCall } from '../../types/agent.types'
 import { useWebSocket } from '../../hooks/useWebSocket'
 import { useAgent } from '../../hooks/useAgent'
 import { useChatContext } from '../../contexts/ChatContext'
+import { uploadDocument } from '../../services/vectorStoreService'
 
 interface ChatInterfaceProps {
   useRealtime?: boolean
 }
 
 export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
-  const { messages, setMessages, isProcessing, setIsProcessing, errorMessage, setErrorMessage, selectedModel, config } = useChatContext()
+  const { messages, setMessages, isProcessing, setIsProcessing, errorMessage, setErrorMessage, selectedModel, config, tokenStreamingEnabled } = useChatContext()
+  const [uploadingFile, setUploadingFile] = useState(false)
 
   // WebSocket for real-time streaming
-  const { isConnected, events, connect, sendMessage: sendWsMessage, clearEvents } = useWebSocket()
+  const { isConnected, events, error: wsError, connect, sendMessage: sendWsMessage, clearEvents } = useWebSocket()
 
   // HTTP for synchronous requests
   const { sendMessage: sendHttpMessage } = useAgent()
 
-  // Track current streaming message being built
+  // Track current streaming message being built (standard mode)
   const streamingMessageRef = useRef<{
     thinking: string[]
     toolCalls: ToolCall[]
@@ -32,8 +34,51 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
     messageId: string
   } | null>(null)
 
+  // Track streaming content for token streaming mode
+  const [streamingContent, setStreamingContent] = useState<{
+    reasoning: string
+    response: string
+    messageId: string
+  } | null>(null)
+
   // Track last processed event to avoid re-processing on every update
   const lastProcessedEventIndex = useRef<number>(-1)
+
+  // Monitor WebSocket connection errors during processing
+  useEffect(() => {
+    if (useRealtime && wsError && isProcessing) {
+      console.error('WebSocket error during processing:', wsError)
+      // Default error message
+      let errorMsg = 'Connection lost during streaming. The backend may have encountered an error. Check server logs for details.'
+      
+      // Try to extract more specific error from wsError if it's an object
+      if (typeof wsError === 'object' && wsError !== null) {
+        const wsErrorObj = wsError as any
+        if (wsErrorObj.error) {
+          errorMsg = wsErrorObj.error
+          if (wsErrorObj.suggestion) {
+            errorMsg += `\n\n💡 Suggestion: ${wsErrorObj.suggestion}`
+          }
+        }
+      } else if (typeof wsError === 'string') {
+        errorMsg = wsError
+      }
+      
+      setErrorMessage(errorMsg)
+      setIsProcessing(false)
+      streamingMessageRef.current = null
+      setStreamingContent(null)
+    }
+  }, [wsError, isProcessing, useRealtime, setErrorMessage, setIsProcessing])
+
+  // Monitor WebSocket disconnections during processing
+  useEffect(() => {
+    if (useRealtime && !isConnected && isProcessing) {
+      console.warn('WebSocket disconnected during processing')
+      setErrorMessage('Connection lost during streaming. Attempting to reconnect...')
+      // The useWebSocket hook will handle reconnection automatically
+    }
+  }, [isConnected, isProcessing, useRealtime, setErrorMessage])
 
   // Process WebSocket events in real-time
   useEffect(() => {
@@ -44,9 +89,49 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
     
     newEvents.forEach((event) => {
       switch (event.type) {
+        case 'token': {
+          // Token streaming mode - accumulate response tokens
+          if (tokenStreamingEnabled) {
+            // Guard: early return if streamingContent is not initialized
+            // This ensures we reuse the messageId from handleSendMessage
+            setStreamingContent(prev => {
+              if (!prev) {
+                console.warn('Token event received before streamingContent initialization, ignoring')
+                return null
+              }
+              return {
+                reasoning: prev.reasoning,
+                response: prev.response + event.data.token,
+                messageId: prev.messageId
+              }
+            })
+          }
+          break
+        }
+
+        case 'reasoning_token': {
+          // Token streaming mode - accumulate reasoning tokens
+          if (tokenStreamingEnabled) {
+            // Guard: early return if streamingContent is not initialized
+            // This ensures we reuse the messageId from handleSendMessage
+            setStreamingContent(prev => {
+              if (!prev) {
+                console.warn('Reasoning token event received before streamingContent initialization, ignoring')
+                return null
+              }
+              return {
+                reasoning: prev.reasoning + event.data.token,
+                response: prev.response,
+                messageId: prev.messageId
+              }
+            })
+          }
+          break
+        }
+
         case 'thinking': {
-          // TypeScript now knows event.data is ThinkingEventData
-          if (streamingMessageRef.current) {
+          // Standard mode - TypeScript now knows event.data is ThinkingEventData
+          if (!tokenStreamingEnabled && streamingMessageRef.current) {
             streamingMessageRef.current.thinking.push(event.data.message)
           }
           break
@@ -78,8 +163,8 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
         }
 
         case 'response': {
-          // TypeScript now knows event.data is ResponseEventData
-          if (streamingMessageRef.current) {
+          // Standard mode - TypeScript now knows event.data is ResponseEventData
+          if (!tokenStreamingEnabled && streamingMessageRef.current) {
             // Update content from response data
             streamingMessageRef.current.content = event.data.response
             
@@ -100,7 +185,29 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
         case 'complete': {
           // TypeScript now knows event.data is CompleteEventData
           // Finalize the streaming message and add it to chat
-          if (streamingMessageRef.current) {
+          if (tokenStreamingEnabled && streamingContent) {
+            // Token streaming mode: use accumulated content
+            const finalReasoning = (streamingContent.reasoning || '').trimEnd()
+            const finalResponse = streamingContent.response.trimEnd()
+            const assistantMessage: Message = {
+              id: streamingContent.messageId,
+              role: 'assistant',
+              content: finalResponse,
+              reasoning: finalReasoning ? finalReasoning : undefined,
+              timestamp: event.timestamp,
+              model: event.data?.model || selectedModel || undefined,
+              pipelineMetadata: event.data?.pipeline_metadata,
+              pipelineMetrics: event.data?.pipeline_metrics,
+              metrics: event.data?.enabled_techniques
+                ? {
+                    enabled_techniques: event.data.enabled_techniques,
+                  }
+                : undefined,
+            }
+            setMessages((prev) => [...prev, assistantMessage])
+            setStreamingContent(null)
+          } else if (streamingMessageRef.current) {
+            // Standard mode: use ref content
             const assistantMessage: Message = {
               id: streamingMessageRef.current.messageId,
               role: 'assistant',
@@ -112,23 +219,45 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
                 ? streamingMessageRef.current.toolCalls 
                 : undefined,
               timestamp: event.timestamp,
+              model: event.data?.model || selectedModel || undefined,
+              pipelineMetadata: event.data?.pipeline_metadata,
+              pipelineMetrics: event.data?.pipeline_metrics,
+              metrics: event.data?.enabled_techniques
+                ? {
+                    enabled_techniques: event.data.enabled_techniques,
+                  }
+                : undefined,
             }
-
             setMessages((prev) => [...prev, assistantMessage])
             streamingMessageRef.current = null
-            setIsProcessing(false)
-            lastProcessedEventIndex.current = -1 // Reset event tracking
-            clearEvents()
           }
+          
+          setIsProcessing(false)
+          lastProcessedEventIndex.current = -1 // Reset event tracking
+          clearEvents()
           break
         }
 
         case 'error': {
           // TypeScript now knows event.data is ErrorEventData
           console.error('WebSocket error event:', event.data)
-          const errorMsg = event.data.message || event.data.error || 'An error occurred during real-time processing.'
+          
+          // Build comprehensive error message
+          let errorMsg = event.data.message || event.data.error || 'An error occurred during real-time processing.'
+          
+          // Add suggestion if available
+          if (event.data.suggestion) {
+            errorMsg += `\n\n💡 Suggestion: ${event.data.suggestion}`
+          }
+          
+          // Add partial response if available (for partial failures)
+          if (event.data.partial_response) {
+            errorMsg += `\n\n📝 Partial response was received before the error occurred.`
+          }
+          
           setErrorMessage(errorMsg)
           streamingMessageRef.current = null
+          setStreamingContent(null)
           setIsProcessing(false)
           lastProcessedEventIndex.current = -1 // Reset event tracking
           clearEvents()
@@ -141,7 +270,7 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
     if (newEvents.length > 0) {
       lastProcessedEventIndex.current = events.length - 1
     }
-  }, [events, useRealtime, clearEvents])
+  }, [events, useRealtime, tokenStreamingEnabled, streamingContent, clearEvents, setMessages, setErrorMessage, setIsProcessing, selectedModel])
 
   const handleSendMessage = async (content: string) => {
     // Clear any previous errors on retry
@@ -164,15 +293,30 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
 
       if (useRealtime) {
         // Use WebSocket for real-time streaming
-        // Initialize the streaming message container
-        streamingMessageRef.current = {
-          thinking: [],
-          toolCalls: [],
-          content: '',
-          messageId: (Date.now() + 1).toString(), // +1 to be different from user message ID
+        if (tokenStreamingEnabled) {
+          // Token streaming mode - initialize streaming content
+          setStreamingContent({
+            reasoning: '',
+            response: '',
+            messageId: (Date.now() + 1).toString(),
+          })
+        } else {
+          // Standard mode - initialize the streaming message container
+          streamingMessageRef.current = {
+            thinking: [],
+            toolCalls: [],
+            content: '',
+            messageId: (Date.now() + 1).toString(),
+          }
         }
         
-        const success = sendWsMessage(content, selectedModel || undefined, true) // Pass selectedModel for realtime
+        const success = sendWsMessage(
+          content, 
+          selectedModel || undefined, 
+          true,
+          undefined,
+          tokenStreamingEnabled  // Pass streaming preference
+        )
         if (!success) {
           // If sending failed, throw an error to be caught by the catch block
           throw new Error('WebSocket not connected')
@@ -190,6 +334,9 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
           toolCalls: response.tool_calls,
           timestamp: response.timestamp,
           model: response.model,
+          pipelineMetadata: response.pipeline_metadata,
+          pipelineMetrics: response.pipeline_metrics,
+          metrics: response.metrics,
         }
 
         setMessages((prev) => [...prev, assistantMessage])
@@ -229,9 +376,14 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
       
       setErrorMessage(userFriendlyMessage)
       
-      // Clean up streaming ref if error occurred during WebSocket
-      if (useRealtime && streamingMessageRef.current) {
-        streamingMessageRef.current = null
+      // Clean up streaming state if error occurred during WebSocket
+      if (useRealtime) {
+        if (streamingMessageRef.current) {
+          streamingMessageRef.current = null
+        }
+        if (streamingContent) {
+          setStreamingContent(null)
+        }
       }
     } finally {
       // Only reset isProcessing for HTTP mode
@@ -239,6 +391,31 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
       if (!useRealtime) {
         setIsProcessing(false)
       }
+    }
+  }
+
+  const handleFileUpload = async (file: File) => {
+    if (!['.txt', '.md'].some(ext => file.name.endsWith(ext))) {
+      setErrorMessage('Only .txt and .md files are supported')
+      return
+    }
+
+    setUploadingFile(true)
+    try {
+      await uploadDocument(file)
+      // Add a system message to chat
+      const systemMessage: Message = {
+        id: Date.now().toString(),
+        role: 'assistant',
+        content: `✅ Document "${file.name}" uploaded successfully and added to vector store. You can now ask questions about its content!`,
+        timestamp: new Date().toISOString()
+      }
+      setMessages(prev => [...prev, systemMessage])
+    } catch (error) {
+      console.error('Upload failed:', error)
+      setErrorMessage(`Failed to upload document: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    } finally {
+      setUploadingFile(false)
     }
   }
 
@@ -273,18 +450,39 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
               <div className="text-sm text-muted-foreground">How can I help you today?</div>
             </div>
           ) : (
-            messages.map((message) => (
-              <ChatMessage key={message.id} message={message} />
-            ))
+            <>
+              {messages.map((message) => (
+                <ChatMessage key={message.id} message={message} />
+              ))}
+              {/* Show streaming message while in progress */}
+              {isProcessing && streamingContent && tokenStreamingEnabled && (
+                <ChatMessage 
+                  key="streaming" 
+                  message={{
+                    id: 'streaming',
+                    role: 'assistant',
+                    content: streamingContent.response,
+                    reasoning: streamingContent.reasoning,
+                    timestamp: new Date().toISOString()
+                  }}
+                  isStreaming={true}
+                />
+              )}
+            </>
           )}
-          {isProcessing && (
+          {isProcessing && !tokenStreamingEnabled && (
             <div className="text-sm text-muted-foreground animate-pulse">Agent is thinking...</div>
           )}
         </div>
       </Card>
 
       {/* Custom Input */}
-      <ChatInput onSend={handleSendMessage} disabled={isProcessing} />
+      <ChatInput
+        onSend={handleSendMessage}
+        onFileUpload={handleFileUpload}
+        disabled={isProcessing}
+        uploadingFile={uploadingFile}
+      />
     </div>
   )
 }

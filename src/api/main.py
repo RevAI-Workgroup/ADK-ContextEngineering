@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse
 import logging
 from datetime import datetime
 
-from src.api.endpoints import chat_router, metrics_router, tools_router, models_router, runs_router, config_router
+from src.api.endpoints import chat_router, metrics_router, tools_router, models_router, runs_router, config_router, documents_router
 from src.api.adk_wrapper import ADKAgentWrapper
 from src.evaluation.metrics import MetricsCollector
 
@@ -24,6 +24,9 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# API version
+VERSION = "2.0.0"
 
 
 @asynccontextmanager
@@ -55,7 +58,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Context Engineering Sandbox API",
     description="Backend API for demonstrating context engineering techniques with ADK agents",
-    version="2.0.0",
+    version=VERSION,
     lifespan=lifespan,
 )
 
@@ -76,7 +79,7 @@ async def root():
     return {
         "status": "healthy",
         "service": "Context Engineering Sandbox API",
-        "version": "2.0.0",
+        "version": VERSION,
         "phase": "Phase 2 - Modular Pipeline Infrastructure",
         "timestamp": datetime.utcnow().isoformat()
     }
@@ -98,6 +101,7 @@ app.include_router(tools_router, prefix="/api", tags=["tools"])
 app.include_router(models_router, prefix="/api", tags=["models"])
 app.include_router(runs_router, prefix="/api", tags=["runs"])
 app.include_router(config_router, prefix="/api", tags=["config"])
+app.include_router(documents_router, prefix="/api", tags=["documents"])
 
 
 # Global exception handler

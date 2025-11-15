@@ -30,11 +30,12 @@ export interface RunSummary {
 }
 
 export interface MetricComparison {
-  metric_name: string
+  metric_name?: string  // Optional when used as dictionary value (key is the metric name)
   values: number[]
   best_index: number
   worst_index: number
-  improvement_pct?: number
+  differences: number[]  // Differences between runs (first run is baseline: 0)
+  improvement_pct?: number  // Optional percentage improvement calculation
 }
 
 export interface ConfigDifference {
@@ -46,14 +47,7 @@ export interface ConfigDifference {
 export interface RunComparison {
   runs: RunRecord[]
   query: string
-  metrics_comparison: {
-    [metricName: string]: {
-      values: number[]
-      best_index: number
-      worst_index: number
-      differences: number[]
-    }
-  }
+  metrics_comparison: Record<string, Omit<MetricComparison, 'metric_name'>>
   config_comparison: {
     differences: ConfigDifference[]
     enabled_techniques: string[][]
@@ -118,6 +112,8 @@ export const formatTimestamp = (timestamp: string): string => {
 }
 
 // Helper to determine if metric is "better" when higher or lower
+// Uses exact matching and token-based matching to avoid false positives
+// with compound metric names (e.g., "latency_ms_reduction" should not match "latency_ms")
 export const isMetricBetterWhenHigher = (metricName: string): boolean => {
   const lowerIsBetter = [
     'latency_ms',
@@ -128,6 +124,21 @@ export const isMetricBetterWhenHigher = (metricName: string): boolean => {
     'cost',
   ]
   
-  return !lowerIsBetter.some(metric => metricName.toLowerCase().includes(metric))
+  const normalizedName = metricName.toLowerCase()
+  
+  // Check for exact match first
+  if (lowerIsBetter.includes(normalizedName)) {
+    return false
+  }
+  
+  // Split metric name into tokens by non-alphanumeric characters
+  const tokens = normalizedName.split(/[^a-z0-9]+/).filter(token => token.length > 0)
+  
+  // Check if any token exactly matches an entry (for compound names like "total_latency_ms")
+  // or if metric name ends with an entry (suffix matching)
+  // This avoids false positives: "latency_ms_reduction" won't match "latency_ms"
+  return !lowerIsBetter.some(metric => 
+    tokens.includes(metric) || normalizedName.endsWith(metric)
+  )
 }
 

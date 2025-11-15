@@ -326,12 +326,8 @@ class MetricsCollector:
                 aggregates[f"{metric_name}_max"] = max(values)
         
         # Average latency and tokens
-        if self.results:
-            aggregates['latency_ms_mean'] = sum(r.latency_ms for r in self.results) / len(self.results)
-            aggregates['tokens_per_query_mean'] = sum(r.token_count for r in self.results) / len(self.results)
-        else:
-            aggregates['latency_ms_mean'] = 0.0
-            aggregates['tokens_per_query_mean'] = 0.0
+        aggregates['latency_ms_mean'] = sum(r.latency_ms for r in self.results) / len(self.results)
+        aggregates['tokens_per_query_mean'] = sum(r.token_count for r in self.results) / len(self.results)
         
         return aggregates
     

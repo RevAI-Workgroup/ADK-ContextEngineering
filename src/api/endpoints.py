@@ -34,6 +34,7 @@ tools_router = APIRouter()
 models_router = APIRouter()
 runs_router = APIRouter()
 config_router = APIRouter()
+documents_router = APIRouter()
 
 
 # ============================================================================
@@ -76,6 +77,8 @@ class ChatResponse(BaseModel):
     metrics: Optional[Dict[str, Any]] = Field(None, description="Response metrics")
     timestamp: str = Field(..., description="Response timestamp")
     model: Optional[str] = Field(None, description="Model used for this response")
+    pipeline_metadata: Optional[Dict[str, Any]] = Field(None, description="RAG and pipeline metadata")
+    pipeline_metrics: Optional[Dict[str, Any]] = Field(None, description="Pipeline execution metrics")
 
 
 class ToolInfo(BaseModel):
@@ -158,7 +161,11 @@ async def chat(
         
         # Collect metrics
         metrics = metrics_collector.collect_response_metrics(result)
-        
+
+        # Extract pipeline metrics from result if available
+        metrics_data = result.get("metrics")
+        pipeline_metrics = metrics_data.get("pipeline_metrics") if isinstance(metrics_data, dict) else None
+
         return ChatResponse(
             response=result.get("response", ""),
             thinking_steps=result.get("thinking_steps"),
@@ -166,6 +173,8 @@ async def chat(
             metrics=metrics,
             timestamp=datetime.now(timezone.utc).isoformat(),
             model=result.get("model", message.model),
+            pipeline_metadata=result.get("pipeline_metadata"),
+            pipeline_metrics=pipeline_metrics,
         )
         
     except Exception as e:
@@ -230,9 +239,10 @@ async def chat_websocket(websocket: WebSocket):
                 })
                 continue
             
-            # Extract model from message data
+            # Extract model and streaming preference from message data
             selected_model = message_data.get("selectedModel")
-            logger.info(f"Processing WebSocket message with model: {selected_model or 'default'}")
+            enable_token_streaming = message_data.get("enableTokenStreaming", False)
+            logger.info(f"Processing WebSocket message with model: {selected_model or 'default'}, token_streaming: {enable_token_streaming}")
             
             # Parse config if provided
             context_config = None
@@ -279,25 +289,62 @@ async def chat_websocket(websocket: WebSocket):
                     })
                     continue
             
-            # Process message with streaming
-            async for event in adk_wrapper.process_message_stream(
-                message=message_data["message"],
-                session_id=message_data.get("session_id"),
-                model=selected_model,
-                config=context_config
-            ):
-                await websocket.send_json({
-                    "type": event["type"],
-                    "data": event["data"],
-                    "timestamp": datetime.now(timezone.utc).isoformat()
-                })
-            
-            # Send completion signal
-            await websocket.send_json({
-                "type": "complete",
-                "data": {},
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            })
+            # Process message with streaming (choose method based on token streaming preference)
+            try:
+                if enable_token_streaming:
+                    logger.info("Using token-level streaming mode")
+                    # Token streaming mode - yields individual tokens
+                    async for event in adk_wrapper.process_message_stream_tokens(
+                        message=message_data["message"],
+                        session_id=message_data.get("session_id"),
+                        model=selected_model,
+                        config=context_config
+                    ):
+                        try:
+                            await websocket.send_json({
+                                "type": event["type"],
+                                "data": event["data"],
+                                "timestamp": datetime.now(timezone.utc).isoformat()
+                            })
+                        except Exception as send_error:
+                            logger.error(f"Error sending event to WebSocket: {send_error}", exc_info=True)
+                            # If we can't send, break the loop
+                            break
+                else:
+                    logger.info("Using standard streaming mode")
+                    # Standard streaming mode - yields complete text chunks
+                    async for event in adk_wrapper.process_message_stream(
+                        message=message_data["message"],
+                        session_id=message_data.get("session_id"),
+                        model=selected_model,
+                        config=context_config
+                    ):
+                        try:
+                            await websocket.send_json({
+                                "type": event["type"],
+                                "data": event["data"],
+                                "timestamp": datetime.now(timezone.utc).isoformat()
+                            })
+                        except Exception as send_error:
+                            logger.error(f"Error sending event to WebSocket: {send_error}", exc_info=True)
+                            # If we can't send, break the loop
+                            break
+                
+                # Send completion signal (if not already sent by streaming method)
+                # Note: The streaming methods now send their own complete signals
+                logger.debug("WebSocket message processing complete")
+            except Exception as stream_error:
+                logger.error(f"Error in streaming loop: {stream_error}", exc_info=True)
+                # Try to send error to client before re-raising
+                try:
+                    await websocket.send_json({
+                        "type": "error",
+                        "data": {"error": f"Streaming error: {str(stream_error)}"},
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    })
+                except Exception:
+                    pass  # If we can't send error, connection is likely already closed
+                raise  # Re-raise to be caught by outer handler
             
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected")
@@ -394,18 +441,48 @@ async def get_metrics_comparison(
 # TOOLS ENDPOINTS
 # ============================================================================
 
-@tools_router.get("/tools", response_model=List[ToolInfo])
+@tools_router.post("/tools", response_model=List[ToolInfo])
 async def get_tools(
+    config: Optional[Dict[str, Any]] = None,
     adk_wrapper: ADKAgentWrapper = Depends(get_adk_wrapper)
 ):
     """
-    Get list of available tools for the ADK agent.
-    
+    Get list of available tools for the ADK agent based on configuration.
+
     Returns information about each tool including name, description,
-    and parameters.
+    and parameters. Tools list may vary based on enabled configuration.
+
+    Args:
+        config: Optional configuration dict to determine which tools are available
     """
     try:
-        tools = adk_wrapper.get_available_tools()
+        # Parse config if provided
+        context_config = None
+        if config:
+            try:
+                context_config = ContextEngineeringConfig.from_dict(config)
+            except (ValueError, TypeError, KeyError) as config_error:
+                logger.warning(f"Invalid config in get_tools, using default: {config_error}")
+
+        tools = adk_wrapper.get_available_tools(context_config)
+        return tools
+    except Exception as e:
+        logger.error(f"Error fetching tools: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@tools_router.get("/tools", response_model=List[ToolInfo])
+async def get_tools_legacy(
+    adk_wrapper: ADKAgentWrapper = Depends(get_adk_wrapper)
+):
+    """
+    Get list of available tools (legacy GET endpoint).
+
+    Returns base tools without configuration-dependent tools.
+    Use POST /api/tools with config for full tool list.
+    """
+    try:
+        tools = adk_wrapper.get_available_tools(None)
         return tools
     except Exception as e:
         logger.error(f"Error fetching tools: {e}", exc_info=True)
@@ -1016,4 +1093,544 @@ async def validate_configuration(request: ConfigValidationRequest):
             "errors": [f"Configuration parsing error: {str(e)}"],
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
+
+
+# ============================================================================
+# DOCUMENT MANAGEMENT ENDPOINTS
+# ============================================================================
+
+from fastapi import UploadFile, File
+from pathlib import Path
+import re
+
+
+def secure_filename(filename: str) -> str:
+    """
+    Sanitize a filename to prevent path traversal and remove unsafe characters.
+    
+    This function:
+    - Extracts only the final basename (strips directory components)
+    - Removes leading slashes and dots
+    - Removes or replaces unsafe characters
+    - Ensures the filename is safe for filesystem operations
+    
+    Args:
+        filename: Original filename from user input
+        
+    Returns:
+        Sanitized filename safe for filesystem use
+        
+    Raises:
+        ValueError: If filename is empty or contains only unsafe characters
+    """
+    if not filename:
+        raise ValueError("Filename cannot be empty")
+    
+    # Extract only the basename, removing any directory components
+    # This prevents path traversal attacks like "../../../etc/passwd"
+    basename = Path(filename).name
+    
+    # Remove leading dots and slashes
+    basename = basename.lstrip('.\\/')
+    
+    if not basename:
+        raise ValueError("Filename contains only unsafe characters")
+    
+    # Remove or replace unsafe characters
+    # Keep alphanumeric, dots, hyphens, underscores, and spaces
+    # Replace other characters with underscores
+    safe_chars = re.sub(r'[^a-zA-Z0-9._\-\s]', '_', basename)
+    
+    # Remove multiple consecutive underscores
+    safe_chars = re.sub(r'_+', '_', safe_chars)
+    
+    # Remove leading/trailing underscores and dots
+    safe_chars = safe_chars.strip('_.')
+    
+    if not safe_chars:
+        raise ValueError("Filename contains only unsafe characters")
+    
+    # Limit filename length to prevent filesystem issues
+    max_length = 255
+    if len(safe_chars) > max_length:
+        # Preserve extension if present
+        name_part = Path(safe_chars).stem[:max_length - 10]  # Reserve space for extension
+        ext_part = Path(safe_chars).suffix
+        safe_chars = name_part + ext_part
+    
+    return safe_chars
+
+
+class DocumentIngestRequest(BaseModel):
+    """Request model for bulk document ingestion."""
+    directory: str = Field(..., description="Directory path to ingest documents from")
+    recursive: bool = Field(True, description="Whether to search recursively")
+    file_extensions: Optional[List[str]] = Field(None, description="File extensions to include")
+
+
+class RAGToolExecuteRequest(BaseModel):
+    """Request model for RAG tool execution."""
+    query: str = Field(..., description="Search query")
+    top_k: int = Field(5, description="Number of documents to retrieve")
+    config: Optional[Dict[str, Any]] = Field(None, description="Optional context engineering configuration")
+
+
+@documents_router.post("/documents/upload")
+async def upload_document(
+    file: UploadFile = File(...),
+    description: Optional[str] = None
+):
+    """
+    Upload a document to the vector store.
+
+    Supports .txt and .md files.
+
+    Args:
+        file: File to upload
+        description: Optional description for the document
+    """
+    try:
+        from src.retrieval.vector_store import get_vector_store
+        from src.retrieval.document_loader import load_document
+        from src.retrieval.chunking import chunk_document
+
+        # Validate and sanitize filename to prevent path traversal
+        if not file.filename:
+            raise HTTPException(
+                status_code=400,
+                detail="Filename is required"
+            )
+        
+        try:
+            sanitized_filename = secure_filename(file.filename)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid filename: {str(e)}"
+            )
+        
+        # Validate file type using sanitized filename
+        file_extension = Path(sanitized_filename).suffix.lower()
+        if file_extension not in [".txt", ".md"]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file type: {file_extension}. Supported: .txt, .md"
+            )
+        
+        # Validate file size (e.g., 10MB limit)
+        MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+        content = await file.read()
+        if len(content) > MAX_FILE_SIZE:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File too large. Maximum size: {MAX_FILE_SIZE / (1024*1024):.1f}MB"
+            )
+        
+        # Ensure knowledge base directory exists
+        kb_dir = Path("data/knowledge_base")
+        kb_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Construct safe file path using sanitized filename
+        file_path = kb_dir / sanitized_filename
+        
+        # Ensure the resolved path is still within kb_dir (defense in depth)
+        try:
+            file_path = file_path.resolve()
+            kb_dir_resolved = kb_dir.resolve()
+            if not file_path.is_relative_to(kb_dir_resolved):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid file path detected"
+                )
+        except (ValueError, OSError) as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid file path: {str(e)}"
+            )
+        
+        # Save uploaded file
+        with open(file_path, "wb") as f:
+            f.write(content)
+
+        logger.info(f"Saved uploaded file: {sanitized_filename} (original: {file.filename})")
+
+        # Load document
+        document = load_document(str(file_path))
+
+        # Add description to metadata if provided
+        if description:
+            document.metadata["description"] = description
+
+        # Chunk document
+        chunks = chunk_document(
+            text=document.content,
+            metadata=document.metadata,
+            strategy="fixed",
+            chunk_size=512,
+            chunk_overlap=50
+        )
+
+        # Add to vector store
+        vector_store = get_vector_store()
+        chunk_texts = [chunk.text for chunk in chunks]
+        chunk_metadatas = [chunk.metadata for chunk in chunks]
+        chunk_ids = vector_store.add_documents(
+            texts=chunk_texts,
+            metadatas=chunk_metadatas
+        )
+
+        logger.info(f"Added {len(chunks)} chunks to vector store")
+
+        return {
+            "success": True,
+            "filename": sanitized_filename,
+            "original_filename": file.filename,
+            "file_size_bytes": len(content),
+            "chunks_created": len(chunks),
+            "doc_id": document.doc_id,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error uploading document: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@documents_router.post("/documents/ingest")
+async def ingest_documents(request: DocumentIngestRequest):
+    """
+    Bulk ingest documents from a directory.
+
+    Processes all documents in the specified directory and adds them to the vector store.
+    """
+    try:
+        from src.retrieval.vector_store import get_vector_store
+        from src.retrieval.document_loader import load_documents_from_directory
+        from src.retrieval.chunking import chunk_document
+
+        # Load documents
+        documents = load_documents_from_directory(
+            directory=request.directory,
+            recursive=request.recursive,
+            file_extensions=request.file_extensions
+        )
+
+        if not documents:
+            return {
+                "success": True,
+                "message": "No documents found to ingest",
+                "documents_processed": 0,
+                "total_chunks": 0
+            }
+
+        # Chunk all documents
+        all_chunks = []
+        for doc in documents:
+            chunks = chunk_document(
+                text=doc.content,
+                metadata=doc.metadata,
+                strategy="fixed",
+                chunk_size=512,
+                chunk_overlap=50
+            )
+            all_chunks.extend(chunks)
+
+        # Add to vector store
+        vector_store = get_vector_store()
+        chunk_texts = [chunk.text for chunk in all_chunks]
+        chunk_metadatas = [chunk.metadata for chunk in all_chunks]
+        vector_store.add_documents(
+            texts=chunk_texts,
+            metadatas=chunk_metadatas
+        )
+
+        logger.info(
+            f"Ingested {len(documents)} documents, "
+            f"created {len(all_chunks)} chunks"
+        )
+
+        return {
+            "success": True,
+            "documents_processed": len(documents),
+            "total_chunks": len(all_chunks),
+            "directory": request.directory,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except Exception as e:
+        logger.error(f"Error ingesting documents: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@documents_router.get("/documents")
+async def list_documents():
+    """
+    List all documents in the knowledge base directory.
+    """
+    try:
+        kb_dir = Path("data/knowledge_base")
+
+        if not kb_dir.exists():
+            return {
+                "documents": [],
+                "count": 0,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+
+        # Get all files
+        documents = []
+        for file_path in kb_dir.iterdir():
+            if file_path.is_file():
+                documents.append({
+                    "filename": file_path.name,
+                    "path": str(file_path.relative_to(kb_dir)),
+                    "size_bytes": file_path.stat().st_size,
+                    "modified_at": datetime.fromtimestamp(
+                        file_path.stat().st_mtime,
+                        tz=timezone.utc
+                    ).isoformat()
+                })
+
+        return {
+            "documents": documents,
+            "count": len(documents),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Error listing documents: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@documents_router.delete("/documents/{filename}")
+async def delete_document(filename: str):
+    """
+    Delete a document from the knowledge base.
+
+    Note: This only deletes the file, not the chunks from the vector store.
+    Use /vector-store/clear to clear the vector store.
+    """
+    try:
+        # Sanitize filename to prevent path traversal
+        try:
+            sanitized_filename = secure_filename(filename)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid filename: {str(e)}"
+            )
+        
+        kb_dir = Path("data/knowledge_base")
+        file_path = kb_dir / sanitized_filename
+        
+        # Ensure the resolved path is still within kb_dir (defense in depth)
+        try:
+            file_path = file_path.resolve()
+            kb_dir_resolved = kb_dir.resolve()
+            if not file_path.is_relative_to(kb_dir_resolved):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid file path detected"
+                )
+        except (ValueError, OSError) as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid file path: {str(e)}"
+            )
+
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail=f"Document '{sanitized_filename}' not found")
+
+        # Delete file
+        file_path.unlink()
+        logger.info(f"Deleted document: {sanitized_filename} (original: {filename})")
+
+        return {
+            "success": True,
+            "filename": sanitized_filename,
+            "original_filename": filename,
+            "message": "Document deleted successfully",
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting document: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@documents_router.get("/vector-store/stats")
+async def get_vector_store_stats():
+    """
+    Get statistics about the vector store.
+    """
+    try:
+        from src.retrieval.vector_store import get_vector_store
+
+        vector_store = get_vector_store()
+        stats = vector_store.get_stats()
+
+        return {
+            **stats,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting vector store stats: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@documents_router.post("/vector-store/clear")
+async def clear_vector_store():
+    """
+    Clear all documents from the vector store.
+
+    This is a destructive operation that removes all embeddings.
+    """
+    try:
+        from src.retrieval.vector_store import get_vector_store
+
+        vector_store = get_vector_store()
+        vector_store.clear()
+
+        logger.info("Vector store cleared")
+
+        return {
+            "success": True,
+            "message": "Vector store cleared successfully",
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Error clearing vector store: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@documents_router.get("/vector-store/search")
+async def search_vector_store(
+    query: str,
+    top_k: int = 5,
+    similarity_threshold: float = 0.7
+):
+    """
+    Search the vector store for similar documents.
+
+    Args:
+        query: Search query
+        top_k: Number of results to return
+        similarity_threshold: Minimum similarity score
+    """
+    try:
+        from src.retrieval.vector_store import get_vector_store
+
+        vector_store = get_vector_store()
+        results = vector_store.search(
+            query=query,
+            top_k=top_k,
+            similarity_threshold=similarity_threshold
+        )
+
+        return {
+            "results": [result.to_dict() for result in results],
+            "count": len(results),
+            "query": query,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Error searching vector store: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@documents_router.post("/rag-tool/execute")
+async def execute_rag_tool(request: RAGToolExecuteRequest):
+    """
+    Execute the RAG tool to search the knowledge base.
+
+    This endpoint is called by the LLM when it decides to use the RAG tool.
+
+    Args:
+        request: RAG tool execution request containing query, top_k, and optional config
+    """
+    try:
+        from src.core.modular_pipeline import ContextPipeline, RAGToolModule
+
+        # Parse config if provided
+        context_config = None
+        if request.config:
+            try:
+                context_config = ContextEngineeringConfig.from_dict(request.config)
+            except (ValueError, TypeError, KeyError) as config_error:
+                error_msg = f"Invalid configuration: {str(config_error)}"
+                logger.error(
+                    "RAG tool configuration parsing failed: %s. Config data: %s",
+                    config_error,
+                    request.config,
+                    exc_info=True
+                )
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "error": "invalid_configuration",
+                        "message": error_msg,
+                        "details": str(config_error)
+                    }
+                )
+            
+            # Validate configuration
+            validation_errors = context_config.validate()
+            if validation_errors:
+                error_msg = f"Configuration validation failed: {validation_errors}"
+                logger.error(
+                    "RAG tool configuration validation failed: %s. Config data: %s",
+                    validation_errors,
+                    request.config,
+                    exc_info=True
+                )
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "error": "invalid_configuration",
+                        "message": error_msg,
+                        "details": str(validation_errors)
+                    }
+                )
+        
+        # Get or create configuration
+        if context_config is None:
+            context_config = ContextEngineeringConfig()
+            # Enable RAG tool by default for this endpoint
+            context_config.rag_tool.enabled = True
+
+        # Create pipeline
+        pipeline = ContextPipeline(context_config)
+
+        # Get the RAG tool module
+        rag_tool_module = pipeline.get_module("rag_tool")
+
+        if not isinstance(rag_tool_module, RAGToolModule):
+            raise HTTPException(
+                status_code=400,
+                detail="RAG tool module is not properly configured"
+            )
+
+        # Execute the tool
+        result = rag_tool_module.execute_tool(query=request.query, top_k=request.top_k)
+
+        return {
+            **result,
+            "query": request.query,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error executing RAG tool: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e)) from e
 

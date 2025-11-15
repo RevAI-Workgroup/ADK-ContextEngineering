@@ -55,3 +55,9 @@ query_enhancement:
     hyde: false  # Hypothetical Document Embeddings
     multi_query: false
 
+# Embedding service configuration
+embeddings:
+  # Maximum number of embedding model instances to cache (LRU eviction)
+  # When exceeded, least-recently-used models are evicted and cleaned up
+  max_models: 5
+

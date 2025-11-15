@@ -17,24 +17,24 @@ export const runHistoryService = {
     const params = new URLSearchParams()
     if (limit !== undefined) params.append('limit', limit.toString())
     if (query) params.append('query', query)
-    
-    const response = await api.get(`/runs?${params.toString()}`)
-    return response.data
+
+    const response = await api.get(`/api/runs?${params.toString()}`)
+    return response.data.runs || []
   },
 
   /**
    * Get a specific run by ID
    */
   async getRunById(runId: string): Promise<RunRecord> {
-    const response = await api.get(`/runs/${runId}`)
-    return response.data
+    const response = await api.get(`/api/runs/${runId}`)
+    return response.data.run
   },
 
   /**
    * Clear all run history
    */
   async clearHistory(): Promise<{ success: boolean; message: string }> {
-    const response = await api.post('/runs/clear')
+    const response = await api.post('/api/runs/clear')
     return response.data
   },
 
@@ -43,9 +43,12 @@ export const runHistoryService = {
    * @param runIds - Array of run IDs to compare
    */
   async compareRuns(runIds: string[]): Promise<RunComparison> {
+    if (!runIds || runIds.length === 0) {
+      throw new Error('At least one run ID is required for comparison')
+    }
     const params = new URLSearchParams()
     runIds.forEach(id => params.append('run_ids', id))
-    const response = await api.get(`/runs/compare?${params.toString()}`)
+    const response = await api.get(`/api/runs/compare?${params.toString()}`)
     return response.data
   },
 
@@ -53,7 +56,7 @@ export const runHistoryService = {
    * Get run history statistics
    */
   async getHistoryStats(): Promise<RunHistoryStats> {
-    const response = await api.get('/runs/stats')
+    const response = await api.get('/api/runs/stats')
     return response.data
   },
 
@@ -61,7 +64,7 @@ export const runHistoryService = {
    * Export run history to JSON
    */
   async exportHistory(): Promise<Blob> {
-    const response = await api.get('/runs/export', {
+    const response = await api.get('/api/runs/export', {
       responseType: 'blob',
     })
     return response.data

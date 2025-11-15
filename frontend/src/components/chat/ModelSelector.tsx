@@ -79,7 +79,7 @@ export function ModelSelector() {
     <div className="flex items-center gap-2">
       <Bot className="h-4 w-4 text-muted-foreground" />
       <Select value={selectedModel || undefined} onValueChange={handleValueChange}>
-        <SelectTrigger className="w-[250px]">
+        <SelectTrigger className="w-[150px]">
           <SelectValue placeholder="Select a model" />
         </SelectTrigger>
         <SelectContent>
