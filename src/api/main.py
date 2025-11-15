@@ -26,9 +26,18 @@ logger = logging.getLogger(__name__)
 VERSION = "2.0.0"
 # OpenTelemetry FastAPI instrumentation
 
-from src.api.endpoints import chat_router, metrics_router, tools_router, models_router
+from src.api.endpoints import (
+    chat_router,
+    metrics_router,
+    tools_router,
+    models_router,
+    runs_router,
+    config_router,
+    documents_router,
+)
 from src.api.adk_wrapper import ADKAgentWrapper
 from src.evaluation.metrics import MetricsCollector
+from src.core.tracing import initialize_tracing, update_memory_usage, record_throughput
 
 try:
     from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
@@ -36,11 +45,6 @@ try:
 except ImportError:
     FASTAPI_INSTRUMENTATION_AVAILABLE = False
     logger.warning("OpenTelemetry FastAPI instrumentation not available")
-
-from src.api.endpoints import chat_router, metrics_router, tools_router, models_router
-from src.api.adk_wrapper import ADKAgentWrapper
-from src.evaluation.metrics import MetricsCollector
-from src.core.tracing import initialize_tracing, update_memory_usage, record_throughput
 
 
 
@@ -134,14 +138,6 @@ app.include_router(runs_router, prefix="/api", tags=["runs"])
 app.include_router(config_router, prefix="/api", tags=["config"])
 app.include_router(documents_router, prefix="/api", tags=["documents"])
 
-
-# Instrument FastAPI with OpenTelemetry
-if FASTAPI_INSTRUMENTATION_AVAILABLE:
-    try:
-        FastAPIInstrumentor.instrument_app(app)
-        logger.info("FastAPI instrumented with OpenTelemetry")
-    except Exception as e:
-        logger.warning(f"Failed to instrument FastAPI: {e}")
 
 # Instrument FastAPI with OpenTelemetry
 if FASTAPI_INSTRUMENTATION_AVAILABLE:
