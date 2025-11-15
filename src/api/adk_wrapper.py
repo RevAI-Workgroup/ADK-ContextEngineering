@@ -484,30 +484,30 @@ class ADKAgentWrapper:
                 else:
                     enriched_message = message
 
-                    # Get the appropriate runner for the specified model
-                    runner = self._get_or_create_runner(model, config)
+                # Get the appropriate runner for the specified model
+                runner = self._get_or_create_runner(model, config)
 
-                    # Generate unique IDs if needed
-                    if not session_id:
-                        session_id = f"session-{uuid.uuid4().hex[:8]}"
-                    user_id = "api-user"
+                # Generate unique IDs if needed
+                if not session_id:
+                    session_id = f"session-{uuid.uuid4().hex[:8]}"
+                user_id = "api-user"
 
-                    # Create message content (use enriched message if pipeline was used)
-                    content = types.Content(
-                        role="user", parts=[types.Part(text=enriched_message)]
-                    )
+                # Create message content (use enriched message if pipeline was used)
+                content = types.Content(
+                    role="user", parts=[types.Part(text=enriched_message)]
+                )
 
-                    # Run agent and collect events
-                    logger.info(f"Invoking agent via Runner for session {session_id}")
+                # Run agent and collect events
+                logger.info(f"Invoking agent via Runner for session {session_id}")
 
-                    # Use run_async since we're already in an async context
-                    # This avoids thread-safety issues with InMemorySessionService
-                    events_list = await self._run_agent_async(
-                        user_id, session_id, content, runner
-                    )
+                # Use run_async since we're already in an async context
+                # This avoids thread-safety issues with InMemorySessionService
+                events_list = await self._run_agent_async(
+                    user_id, session_id, content, runner
+                )
 
-                    logger.info(f"Received {len(events_list)} events from agent")
-                    span.set_attribute("event_count", len(events_list))
+                logger.info(f"Received {len(events_list)} events from agent")
+                span.set_attribute("event_count", len(events_list))
 
                 # Process events to extract response
                 response_text = ""
