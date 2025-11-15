@@ -7,7 +7,10 @@ These tools provide various text statistics and analysis capabilities.
 import re
 from typing import Any, Dict
 
+from src.core.tracing import trace_function
 
+
+@trace_function(attributes={"tool": "analyze_text"})
 def analyze_text(text: str) -> Dict[str, Any]:
     """
     Compute comprehensive statistics for the given text.
@@ -81,6 +84,7 @@ def analyze_text(text: str) -> Dict[str, Any]:
         }
 
 
+@trace_function(attributes={"tool": "count_words"})
 def count_words(text: str) -> Dict[str, Any]:
     """
     Compute word count and a short text preview for the given text.

@@ -10,6 +10,7 @@ import logging
 import re
 import time
 import uuid
+from contextlib import nullcontext
 from typing import Dict, Any, List, AsyncGenerator, Optional, Tuple
 from datetime import datetime
 
@@ -20,6 +21,7 @@ from google.adk import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
 from src.core.config import get_config
+from src.core.tracing import trace_span, record_metric, get_tracer
 from src.core.context_config import ContextEngineeringConfig
 from src.core.modular_pipeline import ContextPipeline
 from src.core.tools import search_knowledge_base
@@ -28,44 +30,65 @@ import hashlib
 logger = logging.getLogger(__name__)
 
 
+class _NullSpan:
+    """Mock span object that does nothing when tracing is unavailable."""
+
+    def set_attribute(self, key: str, value: Any) -> None:
+        """No-op method for compatibility when tracing is disabled."""
+        pass
+
+
+def _get_trace_context(name: str, attributes: Optional[Dict[str, Any]] = None):
+    """
+    Get trace context, falling back to nullcontext if tracing isn't initialized.
+
+    Args:
+        name: Span name
+        attributes: Optional span attributes
+
+    Returns:
+        Context manager that yields a span (real or mock)
+    """
+    try:
+        return trace_span(name, attributes)
+    except RuntimeError:
+        # Tracing not initialized, use nullcontext with mock span
+        logger.debug(f"Tracing not initialized, using nullcontext for span: {name}")
+        return nullcontext(_NullSpan())
+
+
 class ADKAgentWrapper:
     """
     Wrapper for the ADK agent to provide API-friendly interfaces.
-    
+
     Provides both synchronous and streaming methods for agent interaction.
     Supports dynamic model switching with agent caching.
     """
-    
+
     def __init__(self):
         """Initialize the ADK agent wrapper with model caching."""
         # Default agent and runner (for backward compatibility)
         self.agent = root_agent
         self.session_service = InMemorySessionService()
         self.runner = Runner(
-            agent=root_agent,
-            app_name='agents',
-            session_service=self.session_service
+            agent=root_agent, app_name="agents", session_service=self.session_service
         )
-        
+
         # Agent cache for different models
-        self._agent_cache: Dict[str, Agent] = {
-            "default": root_agent
-        }
-        self._runner_cache: Dict[str, Runner] = {
-            "default": self.runner
-        }
-        
+        self._agent_cache: Dict[str, Agent] = {"default": root_agent}
+        self._runner_cache: Dict[str, Runner] = {"default": self.runner}
+
         self.sessions: Dict[str, Dict[str, Any]] = {}
-        
+
         # Load config for model settings
         try:
             self.config = get_config()
         except Exception as e:
             logger.warning(f"Could not load config: {e}")
             self.config = None
-        
+
         logger.info("ADK Agent Wrapper initialized with dynamic model support")
-    
+
     def _get_config_hash(self, config: Optional[ContextEngineeringConfig]) -> str:
         """
         Generate a hash of the config to use as part of cache key.
@@ -84,7 +107,9 @@ class ADKAgentWrapper:
         techniques = sorted(config.get_enabled_techniques())
         config_str = ",".join(techniques)
         hash_value = hashlib.md5(config_str.encode()).hexdigest()[:8]
-        logger.debug(f"Config hash generated: {hash_value} from techniques: {techniques}")
+        logger.debug(
+            f"Config hash generated: {hash_value} from techniques: {techniques}"
+        )
         return hash_value
 
     def _build_tools_list(self, config: Optional[ContextEngineeringConfig]) -> List:
@@ -99,20 +124,30 @@ class ADKAgentWrapper:
         """
         # Start with base tools
         tools = list(TOOLS)
-        logger.debug(f"Base tools count: {len(tools)}, names: {[t.__name__ for t in tools]}")
+        logger.debug(
+            f"Base tools count: {len(tools)}, names: {[t.__name__ for t in tools]}"
+        )
 
         # Add RAG-as-tool if enabled
         if config:
-            logger.debug(f"Config provided, checking rag_tool_enabled: {config.rag_tool_enabled}")
+            logger.debug(
+                f"Config provided, checking rag_tool_enabled: {config.rag_tool_enabled}"
+            )
             if config.rag_tool_enabled:
-                logger.info("✓ RAG-as-tool is ENABLED - Adding search_knowledge_base tool to agent")
+                logger.info(
+                    "✓ RAG-as-tool is ENABLED - Adding search_knowledge_base tool to agent"
+                )
                 tools.append(search_knowledge_base)
             else:
-                logger.info("✗ RAG-as-tool is DISABLED - NOT adding search_knowledge_base tool")
+                logger.info(
+                    "✗ RAG-as-tool is DISABLED - NOT adding search_knowledge_base tool"
+                )
         else:
             logger.debug("No config provided, using base tools only")
 
-        logger.info(f"Final tools list: {len(tools)} tools - {[t.__name__ for t in tools]}")
+        logger.info(
+            f"Final tools list: {len(tools)} tools - {[t.__name__ for t in tools]}"
+        )
         return tools
 
     def _is_reasoning_model(self, model: Optional[str]) -> bool:
@@ -142,10 +177,7 @@ class ADKAgentWrapper:
         return any(keyword in model_lower for keyword in reasoning_keywords)
 
     def _segment_stream_text(
-        self,
-        text: str,
-        in_reasoning_phase: bool,
-        is_reasoning_model: bool
+        self, text: str, in_reasoning_phase: bool, is_reasoning_model: bool
     ) -> Tuple[List[Tuple[str, str]], bool]:
         """
         Split streamed text into reasoning and response segments.
@@ -172,35 +204,39 @@ class ADKAgentWrapper:
         remaining = text
         segments: List[Tuple[str, str]] = []
 
-        open_pattern = re.compile(r"<\s*(think|thinking|analysis|reasoning|thought)\s*>", re.IGNORECASE)
-        close_pattern = re.compile(r"<\s*/\s*(think|thinking|analysis|reasoning|thought)\s*>", re.IGNORECASE)
+        open_pattern = re.compile(
+            r"<\s*(think|thinking|analysis|reasoning|thought)\s*>", re.IGNORECASE
+        )
+        close_pattern = re.compile(
+            r"<\s*/\s*(think|thinking|analysis|reasoning|thought)\s*>", re.IGNORECASE
+        )
         answer_pattern = re.compile(
             r"(?:^|\n+)\s*(final answer|answer|final response|response|solution)\s*:?",
-            re.IGNORECASE
+            re.IGNORECASE,
         )
         reasoning_label_pattern = re.compile(
             r"^\s*(analysis|reasoning|thought|thinking|chain of thought|deliberation)\s*:?",
-            re.IGNORECASE
+            re.IGNORECASE,
         )
 
         while remaining:
             if in_reasoning_phase:
                 close_match = close_pattern.search(remaining)
                 if close_match:
-                    segment_text = remaining[:close_match.start()]
+                    segment_text = remaining[: close_match.start()]
                     if segment_text:
                         segments.append(("reasoning", segment_text))
-                    remaining = remaining[close_match.end():]
+                    remaining = remaining[close_match.end() :]
                     in_reasoning_phase = False
                     continue
-                
+
                 answer_match = answer_pattern.search(remaining)
                 if answer_match:
                     if answer_match.start() > 0:
-                        reasoning_part = remaining[:answer_match.start()]
+                        reasoning_part = remaining[: answer_match.start()]
                         if reasoning_part.strip():
                             segments.append(("reasoning", reasoning_part))
-                    remaining = remaining[answer_match.start():]
+                    remaining = remaining[answer_match.start() :]
                     in_reasoning_phase = False
                     continue
                 else:
@@ -212,8 +248,13 @@ class ADKAgentWrapper:
                 # Handle explicit reasoning labels (e.g., "Reasoning:", "Analysis:")
                 reasoning_label_match = reasoning_label_pattern.match(remaining)
                 if reasoning_label_match:
-                    answer_match = answer_pattern.search(remaining, reasoning_label_match.end())
-                    if answer_match and answer_match.start() > reasoning_label_match.end():
+                    answer_match = answer_pattern.search(
+                        remaining, reasoning_label_match.end()
+                    )
+                    if (
+                        answer_match
+                        and answer_match.start() > reasoning_label_match.end()
+                    ):
                         split_index = answer_match.start()
                         reasoning_part = remaining[:split_index]
                         response_part = remaining[split_index:]
@@ -235,18 +276,18 @@ class ADKAgentWrapper:
 
                 open_match = open_pattern.search(remaining)
                 if open_match:
-                    before_text = remaining[:open_match.start()]
+                    before_text = remaining[: open_match.start()]
                     if before_text:
                         segments.append(("response", before_text))
-                    remaining = remaining[open_match.end():]
+                    remaining = remaining[open_match.end() :]
                     in_reasoning_phase = True
                     continue
 
                 # Fallback heuristics: many reasoning models emit "Answer:" style separators.
                 answer_match = answer_pattern.search(remaining)
                 if answer_match and answer_match.start() > 0:
-                    reasoning_part = remaining[:answer_match.start()]
-                    response_part = remaining[answer_match.start():]
+                    reasoning_part = remaining[: answer_match.start()]
+                    response_part = remaining[answer_match.start() :]
 
                     if reasoning_part.strip():
                         segments.append(("reasoning", reasoning_part))
@@ -268,7 +309,7 @@ class ADKAgentWrapper:
     def _get_or_create_runner(
         self,
         model: Optional[str] = None,
-        config: Optional[ContextEngineeringConfig] = None
+        config: Optional[ContextEngineeringConfig] = None,
     ) -> Runner:
         """
         Get or create a runner for the specified model and configuration.
@@ -291,25 +332,31 @@ class ADKAgentWrapper:
             return self._runner_cache[cache_key]
 
         # Create new agent with specified model and config
-        logger.info(f"Creating new agent for model: {model}, config_hash: {config_hash}")
+        logger.info(
+            f"Creating new agent for model: {model}, config_hash: {config_hash}"
+        )
 
         # Get model config from config file or use defaults
         temperature = 0.7
         max_tokens = 4096
 
         if self.config:
-            temperature = self.config.get("models.ollama.primary_model.temperature", 0.7)
+            temperature = self.config.get(
+                "models.ollama.primary_model.temperature", 0.7
+            )
             max_tokens = self.config.get("models.ollama.primary_model.max_tokens", 4096)
 
         # Build tools list based on configuration
         tools = self._build_tools_list(config)
-        logger.info(f"Agent will have {len(tools)} tools: {[t.__name__ for t in tools]}")
+        logger.info(
+            f"Agent will have {len(tools)} tools: {[t.__name__ for t in tools]}"
+        )
 
         # Create new agent with the specified model
         # Sanitize model name for agent name (only alphanumeric and underscores)
-        safe_model_name = re.sub(r'[^A-Za-z0-9_]', '_', model or 'default')
-        safe_model_name = re.sub(r'_+', '_', safe_model_name)
-        safe_model_name = safe_model_name.strip('_')
+        safe_model_name = re.sub(r"[^A-Za-z0-9_]", "_", model or "default")
+        safe_model_name = re.sub(r"_+", "_", safe_model_name)
+        safe_model_name = safe_model_name.strip("_")
 
         agent_description = (
             "An intelligent AI agent for answering questions and performing tasks "
@@ -344,18 +391,16 @@ class ADKAgentWrapper:
             model=LiteLlm(
                 model=f"ollama_chat/{model}" if model else "ollama_chat/qwen3:4b",
                 temperature=temperature,
-                max_tokens=max_tokens
+                max_tokens=max_tokens,
             ),
             description=agent_description,
             instruction=custom_instruction,
-            tools=tools
+            tools=tools,
         )
 
         # Create runner for the new agent
         new_runner = Runner(
-            agent=new_agent,
-            app_name='agents',
-            session_service=self.session_service
+            agent=new_agent, app_name="agents", session_service=self.session_service
         )
 
         # Cache the agent and runner
@@ -364,204 +409,187 @@ class ADKAgentWrapper:
 
         logger.info(f"Successfully created and cached agent: {cache_key}")
         return new_runner
-    
+
     async def process_message(
         self,
         message: str,
         session_id: Optional[str] = None,
         include_thinking: bool = True,
         model: Optional[str] = None,
-        config: Optional[ContextEngineeringConfig] = None
+        config: Optional[ContextEngineeringConfig] = None,
     ) -> Dict[str, Any]:
         """
         Process a message through the ADK agent (synchronous).
-        
+
         Args:
             message: User's message
             session_id: Optional session ID for conversation tracking
             include_thinking: Whether to include thinking steps
             model: Optional model name to use (e.g., "qwen3:4b", "llama2:7b")
             config: Optional context engineering configuration
-            
+
         Returns:
             Dictionary containing response, thinking steps, tool calls, and metrics
         """
-        logger.info(f"Processing message with model '{model or 'default'}': {message[:50]}...")
+        logger.info(
+            f"Processing message with model '{model or 'default'}': {message[:50]}..."
+        )
         start_time = time.time()
-        
-        try:
-            # Initialize context engineering pipeline if config provided
-            pipeline = None
-            pipeline_context = None
-            pipeline_metrics = {}
-            
-            if config:
-                logger.info(f"Initializing context engineering pipeline with config: {config.get_enabled_techniques()}")
-                pipeline = ContextPipeline(config)
-                
-                # Process message through pipeline before sending to agent
-                pipeline_context = pipeline.process(
-                    query=message,
-                    conversation_history=[]  # TODO: Get from session in future
-                )
-                
-                # Get pipeline metrics
-                pipeline_metrics = pipeline.get_aggregated_metrics()
-                logger.info(f"Pipeline processed in {pipeline_metrics.get('total_execution_time_ms', 0):.2f}ms")
-                
-                # If pipeline modified the context, use the enriched version
-                if pipeline_context.context:
-                    # Prepend pipeline context to the message
-                    enriched_message = f"{pipeline_context.context}\n\nUser Query: {message}"
-                    logger.info(f"Enriched message with pipeline context ({len(pipeline_context.context)} chars)")
+        resolved_model = model if model else "default"
+
+        with _get_trace_context(
+            "adk_wrapper.process_message",
+            attributes={
+                "model": resolved_model,
+                "session_id": session_id or "none",
+                "message_length": len(message),
+                "include_thinking": include_thinking,
+            },
+        ) as span:
+            try:
+                # Initialize context engineering pipeline if config provided
+                pipeline = None
+                pipeline_context = None
+                pipeline_metrics = {}
+
+                if config:
+                    logger.info(
+                        f"Initializing context engineering pipeline with config: {config.get_enabled_techniques()}"
+                    )
+                    pipeline = ContextPipeline(config)
+
+                    # Process message through pipeline before sending to agent
+                    pipeline_context = pipeline.process(
+                        query=message,
+                        conversation_history=[],  # TODO: Get from session in future
+                    )
+
+                    # Get pipeline metrics
+                    pipeline_metrics = pipeline.get_aggregated_metrics()
+                    logger.info(
+                        f"Pipeline processed in {pipeline_metrics.get('total_execution_time_ms', 0):.2f}ms"
+                    )
+
+                    # If pipeline modified the context, use the enriched version
+                    if pipeline_context.context:
+                        # Prepend pipeline context to the message
+                        enriched_message = (
+                            f"{pipeline_context.context}\n\nUser Query: {message}"
+                        )
+                        logger.info(
+                            f"Enriched message with pipeline context ({len(pipeline_context.context)} chars)"
+                        )
+                    else:
+                        enriched_message = message
                 else:
                     enriched_message = message
-            else:
-                enriched_message = message
-            
-            # Get the appropriate runner for the specified model
-            runner = self._get_or_create_runner(model, config)
-            
-            # Track the resolved model (use "default" if model is None)
-            resolved_model = model if model else "default"
-            
-            # Generate unique IDs if needed
-            if not session_id:
-                session_id = f"session-{uuid.uuid4().hex[:8]}"
-            user_id = "api-user"
-            
-            # Create message content (use enriched message if pipeline was used)
-            content = types.Content(
-                role='user',
-                parts=[types.Part(text=enriched_message)]
-            )
-            
-            # Run agent and collect events
-            logger.info(f"Invoking agent via Runner for session {session_id}")
-            
-            # Use run_async since we're already in an async context
-            # This avoids thread-safety issues with InMemorySessionService
-            events_list = await self._run_agent_async(user_id, session_id, content, runner)
-            
-            logger.info(f"Received {len(events_list)} events from agent")
-            
-            # Process events to extract response
-            response_text = ""
-            tool_calls = []
-            thinking_steps = []
 
-            for idx, event in enumerate(events_list):
-                event_type = type(event).__name__
-                logger.info(f"[EVENT {idx}] Type: {event_type}")
+                    # Get the appropriate runner for the specified model
+                    runner = self._get_or_create_runner(model, config)
 
-                # Log all event attributes for debugging
-                event_attrs = {attr: getattr(event, attr) for attr in dir(event) if not attr.startswith('_')}
-                logger.debug(f"[EVENT {idx}] Attributes: {list(event_attrs.keys())}")
+                    # Generate unique IDs if needed
+                    if not session_id:
+                        session_id = f"session-{uuid.uuid4().hex[:8]}"
+                    user_id = "api-user"
 
-                # Extract text from content
-                if hasattr(event, 'content') and event.content:
-                    if hasattr(event.content, 'parts'):
-                        for part_idx, part in enumerate(event.content.parts):
-                            part_type = type(part).__name__
-                            logger.info(f"[EVENT {idx}] Part {part_idx}: {part_type}")
+                    # Create message content (use enriched message if pipeline was used)
+                    content = types.Content(
+                        role="user", parts=[types.Part(text=enriched_message)]
+                    )
 
-                            # Extract text
-                            if hasattr(part, 'text') and part.text:
-                                text = part.text
-                                logger.info(f"[EVENT {idx}] Text: {text[:100]}")
+                    # Run agent and collect events
+                    logger.info(f"Invoking agent via Runner for session {session_id}")
 
-                                # Filter out raw tool call XML/JSON from response
-                                # Remove <tool>...</tool> tags and their content
-                                cleaned_text = re.sub(r'<tool>.*?</tool>', '', text, flags=re.DOTALL)
-                                cleaned_text = cleaned_text.strip()
+                    # Use run_async since we're already in an async context
+                    # This avoids thread-safety issues with InMemorySessionService
+                    events_list = await self._run_agent_async(
+                        user_id, session_id, content, runner
+                    )
 
-                                # Only use non-empty cleaned text
-                                if cleaned_text:
-                                    response_text = cleaned_text
-                                else:
-                                    # If text was entirely tool calls, don't update response_text
-                                    logger.debug(f"[EVENT {idx}] Text was entirely tool calls, skipping")
+                    logger.info(f"Received {len(events_list)} events from agent")
+                    span.set_attribute("event_count", len(events_list))
 
-                            # Check for function call (tool usage)
-                            if hasattr(part, 'function_call'):
-                                func_call = part.function_call
-                                logger.info(f"[EVENT {idx}] Function call detected: {func_call}")
-                                if func_call:
-                                    tool_calls.append({
-                                        "name": func_call.name if hasattr(func_call, 'name') else "unknown_tool",
-                                        "description": f"Called tool: {func_call.name if hasattr(func_call, 'name') else 'unknown'}",
-                                        "parameters": dict(func_call.args) if hasattr(func_call, 'args') else {},
-                                        "timestamp": datetime.utcnow().isoformat()
-                                    })
+                # Process events to extract response
+                response_text = ""
+                tool_calls = []
+                thinking_steps = []
 
-                            # Check for function response (tool result)
-                            if hasattr(part, 'function_response'):
-                                func_response = part.function_response
-                                logger.info(f"[EVENT {idx}] Function response detected: {func_response}")
-                                if func_response and tool_calls:
-                                    # Add result to the last tool call
-                                    tool_calls[-1]["result"] = func_response.response if hasattr(func_response, 'response') else str(func_response)
+                for idx, event in enumerate(events_list):
+                    event_type = type(event).__name__
+                    logger.debug(f"Processing event {idx}: {event_type}")
 
-                # Legacy: Look for tool in event type name
-                if 'tool' in event_type.lower() and not tool_calls:
-                    logger.warning(f"[EVENT {idx}] Tool-like event but no function_call found: {event_type}")
-                    tool_calls.append({
-                        "name": event_type,
-                        "description": f"Tool invocation: {event_type}",
-                        "timestamp": datetime.utcnow().isoformat()
-                    })
-            
-            if response_text:
-                logger.info(f"Agent response received: {response_text[:200]}...")
-            else:
-                logger.warning(f"No response text extracted from {len(events_list)} events")
-            
-            # Build response data
-            response_data = {
-                "response": response_text,
-                "thinking_steps": thinking_steps if include_thinking else None,
-                "tool_calls": tool_calls if tool_calls else None,
-                "model": resolved_model
-            }
-            
-            # Calculate metrics
-            end_time = time.time()
-            latency_ms = (end_time - start_time) * 1000
-            
-            response_data["metrics"] = {
-                "latency_ms": latency_ms,
-                "timestamp": datetime.utcnow().isoformat(),
-                "session_id": session_id,
-                "pipeline_metrics": pipeline_metrics if pipeline_metrics else None,
-                "enabled_techniques": config.get_enabled_techniques() if config else []
-            }
-            
-            # Include pipeline metadata if available
-            if pipeline_context:
-                response_data["pipeline_metadata"] = pipeline_context.metadata
-            
-            # Store in session if session_id provided
-            if session_id:
-                if session_id not in self.sessions:
-                    self.sessions[session_id] = {"messages": []}
-                self.sessions[session_id]["messages"].append({
-                    "message": message,
-                    "response": response_data,
-                    "timestamp": datetime.utcnow().isoformat()
-                })
-            
-            logger.info(f"Message processed in {latency_ms:.2f}ms")
-            return response_data
-            
-        except Exception as e:
-            logger.error(f"Error processing message: {e}", exc_info=True)
-            raise
-    
-    async def _run_agent_async(self, user_id: str, session_id: str, content, runner: Runner):
+                    # Extract text from content
+                    if hasattr(event, "content") and event.content:
+                        if hasattr(event.content, "parts"):
+                            for part in event.content.parts:
+                                if hasattr(part, "text") and part.text:
+                                    text = part.text
+                                    logger.info(
+                                        f"Extracted text from event {idx}: {text[:100]}"
+                                    )
+                                    response_text = text
+
+                    # Look for tool call information
+                    if "tool" in event_type.lower():
+                        tool_calls.append(
+                            {
+                                "name": event_type,
+                                "description": f"Tool invocation: {event_type}",
+                                "timestamp": datetime.utcnow().isoformat(),
+                            }
+                        )
+
+                if response_text:
+                    logger.info(f"Agent response received: {response_text[:200]}...")
+                else:
+                    logger.warning(
+                        f"No response text extracted from {len(events_list)} events"
+                    )
+
+                # Build response data
+                response_data = {
+                    "response": response_text,
+                    "thinking_steps": thinking_steps if include_thinking else None,
+                    "tool_calls": tool_calls if tool_calls else None,
+                    "model": resolved_model,
+                }
+
+                # Calculate metrics
+                end_time = time.time()
+                latency_ms = (end_time - start_time) * 1000
+
+                response_data["metrics"] = {
+                    "latency_ms": latency_ms,
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "session_id": session_id,
+                }
+
+                # Store in session if session_id provided
+                if session_id:
+                    if session_id not in self.sessions:
+                        self.sessions[session_id] = {"messages": []}
+                    self.sessions[session_id]["messages"].append(
+                        {
+                            "message": message,
+                            "response": response_data,
+                            "timestamp": datetime.utcnow().isoformat(),
+                        }
+                    )
+
+                logger.info(f"Message processed in {latency_ms:.2f}ms")
+                return response_data
+
+            except Exception as e:
+                logger.error(f"Error processing message: {e}", exc_info=True)
+                raise
+
+    async def _run_agent_async(
+        self, user_id: str, session_id: str, content, runner: Runner
+    ):
         """
         Helper method to run agent asynchronously using run_async.
         This avoids thread-safety issues with InMemorySessionService.
-        
+
         Args:
             user_id: User identifier
             session_id: Session identifier
@@ -569,103 +597,111 @@ class ADKAgentWrapper:
             runner: Runner instance to use for this request
         """
         events_list = []
-        try:
-            # Create or get session
-            session_created = False
+        with _get_trace_context(
+            "adk_wrapper._run_agent_async",
+            attributes={"user_id": user_id, "session_id": session_id},
+        ) as span:
             try:
-                logger.info(f"Attempting to get existing session: {session_id}")
-                existing_session = await self.session_service.get_session(
-                    app_name='agents',
-                    user_id=user_id,
-                    session_id=session_id
-                )
-                logger.info(f"Found existing session: {existing_session.id}")
-            except Exception as e:
-                # Session doesn't exist, create it
-                logger.info(f"Session not found ({type(e).__name__}), creating new session: {session_id}")
+                # Create or get session
+                session_created = False
                 try:
-                    new_session = await self.session_service.create_session(
-                        app_name='agents',
-                        user_id=user_id,
-                        session_id=session_id
+                    logger.info(f"Attempting to get existing session: {session_id}")
+                    existing_session = await self.session_service.get_session(
+                        app_name="agents", user_id=user_id, session_id=session_id
                     )
-                    session_created = True
-                    logger.info(f"Successfully created session: {new_session.id}")
-                    
-                    # Verify we can retrieve it
-                    verify_session = await self.session_service.get_session(
-                        app_name='agents',
-                        user_id=user_id,
-                        session_id=session_id
+                    logger.info(f"Found existing session: {existing_session.id}")
+                except Exception as e:
+                    # Session doesn't exist, create it
+                    logger.info(
+                        f"Session not found ({type(e).__name__}), creating new session: {session_id}"
                     )
-                    logger.info(f"Verified session retrieval: {verify_session.id}")
-                except Exception as create_error:
-                    logger.error(f"Failed to create session: {create_error}", exc_info=True)
-                    raise
-            
-            # Run the agent asynchronously using the provided runner
-            logger.info(f"Starting async agent run for session {session_id} (created={session_created})")
-            async for event in runner.run_async(
-                user_id=user_id,
-                session_id=session_id,
-                new_message=content
-            ):
-                events_list.append(event)
-                event_type = type(event).__name__
-                logger.debug(f"Event received: {event_type}")
-            
-            logger.info(f"Agent run complete, collected {len(events_list)} events")
-        except Exception as e:
-            logger.error(f"Error in _run_agent_async: {e}", exc_info=True)
-            raise
-        
-        return events_list
-    
+                    try:
+                        new_session = await self.session_service.create_session(
+                            app_name="agents", user_id=user_id, session_id=session_id
+                        )
+                        session_created = True
+                        logger.info(f"Successfully created session: {new_session.id}")
+
+                        # Verify we can retrieve it
+                        verify_session = await self.session_service.get_session(
+                            app_name="agents", user_id=user_id, session_id=session_id
+                        )
+                        logger.info(f"Verified session retrieval: {verify_session.id}")
+                    except Exception as create_error:
+                        logger.error(
+                            f"Failed to create session: {create_error}", exc_info=True
+                        )
+                        raise
+
+                span.set_attribute("session_created", session_created)
+
+                # Run the agent asynchronously using the provided runner
+                logger.info(
+                    f"Starting async agent run for session {session_id} (created={session_created})"
+                )
+                async for event in runner.run_async(
+                    user_id=user_id, session_id=session_id, new_message=content
+                ):
+                    events_list.append(event)
+                    event_type = type(event).__name__
+                    logger.debug(f"Event received: {event_type}")
+
+                logger.info(f"Agent run complete, collected {len(events_list)} events")
+                span.set_attribute("event_count", len(events_list))
+            except Exception as e:
+                span.set_attribute("error", str(e))
+                logger.error(f"Error in _run_agent_async: {e}", exc_info=True)
+                raise
+
+            return events_list
+
     async def process_message_stream_tokens(
         self,
         message: str,
         session_id: Optional[str] = None,
         model: Optional[str] = None,
-        config: Optional[ContextEngineeringConfig] = None
+        config: Optional[ContextEngineeringConfig] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Process a message through the ADK agent with token-level streaming.
-        
+
         Yields individual tokens as they're generated for a more responsive UX.
         This is different from process_message_stream which sends complete text chunks.
-        
+
         Args:
             message: User's message
             session_id: Optional session ID
             model: Optional model name to use
             config: Optional context engineering configuration
-            
+
         Yields:
             Event dictionaries with token-level updates
         """
-        logger.info(f"Processing message with token streaming (model: '{model or 'default'}'): {message[:50]}...")
-        
+        logger.info(
+            f"Processing message with token streaming (model: '{model or 'default'}'): {message[:50]}..."
+        )
+
         try:
             # Get the appropriate runner for the specified model
             runner = self._get_or_create_runner(model, config)
-            
+
             # Track the resolved model
             resolved_model = model if model else "default"
-            
+
             # Detect if this is a reasoning-capable model (used for heuristics only)
             is_reasoning_model = self._is_reasoning_model(model)
-            
+
             # Generate unique IDs if needed
             if not session_id:
                 session_id = f"session-{uuid.uuid4().hex[:8]}"
             user_id = "api-user"
-            
+
             # Send initial thinking event
             yield {
                 "type": "thinking",
-                "data": {"message": "Processing your request..."}
+                "data": {"message": "Processing your request..."},
             }
-            
+
             # Initialize context engineering pipeline if config provided
             pipeline = None
             pipeline_context = None
@@ -674,59 +710,67 @@ class ADKAgentWrapper:
             pipeline_metrics = None
             pipeline_metadata = None
             enabled_techniques = None
-            
+
             if config:
-                logger.info(f"Initializing context engineering pipeline with config: {config.get_enabled_techniques()}")
+                logger.info(
+                    f"Initializing context engineering pipeline with config: {config.get_enabled_techniques()}"
+                )
                 pipeline = ContextPipeline(config)
                 enabled_techniques = config.get_enabled_techniques()
-                
+
                 yield {
                     "type": "thinking",
-                    "data": {"message": f"Running context engineering: {', '.join(enabled_techniques)}"}
+                    "data": {
+                        "message": f"Running context engineering: {', '.join(enabled_techniques)}"
+                    },
                 }
-                
+
                 # Process message through pipeline
                 pipeline_context = pipeline.process(
-                    query=message,
-                    conversation_history=[]
+                    query=message, conversation_history=[]
                 )
-                
+
                 # Get aggregated metrics after processing
                 pipeline_metrics = pipeline.get_aggregated_metrics()
                 pipeline_metadata = pipeline_context.metadata
-                
+
                 logger.info(
                     f"Pipeline processed in {pipeline_metrics.get('total_execution_time_ms', 0):.2f}ms "
                     f"with {len(pipeline_metrics.get('enabled_modules', []))} enabled modules"
                 )
-                
+
                 # Send early metadata event with pipeline information
                 yield {
                     "type": "thinking",
                     "data": {
                         "message": f"Pipeline execution complete. Enabled modules: {', '.join(pipeline_metrics.get('enabled_modules', []))}"
-                    }
+                    },
                 }
-                
+
                 # If pipeline modified the context, use the enriched version
                 if pipeline_context.context:
-                    enriched_message = f"{pipeline_context.context}\n\nUser Query: {message}"
-                    logger.info(f"Enriched message with pipeline context ({len(pipeline_context.context)} chars)")
-            
+                    enriched_message = (
+                        f"{pipeline_context.context}\n\nUser Query: {message}"
+                    )
+                    logger.info(
+                        f"Enriched message with pipeline context ({len(pipeline_context.context)} chars)"
+                    )
+
             # Create message content
             content = types.Content(
-                role='user',
-                parts=[types.Part(text=enriched_message)]
+                role="user", parts=[types.Part(text=enriched_message)]
             )
-            
+
             # Run agent and stream tokens as they arrive
             logger.info(f"Invoking agent with token streaming for session {session_id}")
-            
+
             current_reasoning = ""
             current_response = ""
             in_reasoning_phase = False
-            stream_delay_seconds = 0.01  # 10ms delay to mimic incremental streaming cadence
-            
+            stream_delay_seconds = (
+                0.01  # 10ms delay to mimic incremental streaming cadence
+            )
+
             # Ensure session exists before running agent
             # Use the same session creation logic as _run_agent_async
             try:
@@ -734,96 +778,109 @@ class ADKAgentWrapper:
                 logger.info(f"Attempting to get existing session: {session_id}")
                 try:
                     _existing_session = await self.session_service.get_session(
-                        app_name='agents',
-                        user_id=user_id,
-                        session_id=session_id
+                        app_name="agents", user_id=user_id, session_id=session_id
                     )
                     logger.info(f"Found existing session: {_existing_session.id}")
                 except Exception as get_error:
                     # Session doesn't exist, create it
-                    logger.info(f"Session not found ({type(get_error).__name__}), creating new session: {session_id}")
+                    logger.info(
+                        f"Session not found ({type(get_error).__name__}), creating new session: {session_id}"
+                    )
                     try:
                         new_session = await self.session_service.create_session(
-                            app_name='agents',
-                            user_id=user_id,
-                            session_id=session_id
+                            app_name="agents", user_id=user_id, session_id=session_id
                         )
                         logger.info(f"Successfully created session: {new_session.id}")
-                        
+
                         # Verify we can retrieve it
                         verify_session = await self.session_service.get_session(
-                            app_name='agents',
-                            user_id=user_id,
-                            session_id=session_id
+                            app_name="agents", user_id=user_id, session_id=session_id
                         )
                         logger.info(f"Verified session retrieval: {verify_session.id}")
                     except Exception as create_error:
-                        logger.error(f"Failed to create session: {create_error}", exc_info=True)
+                        logger.error(
+                            f"Failed to create session: {create_error}", exc_info=True
+                        )
                         yield {
                             "type": "error",
-                            "data": {"error": f"Failed to create session: {str(create_error)}"}
+                            "data": {
+                                "error": f"Failed to create session: {str(create_error)}"
+                            },
                         }
                         return
             except Exception as session_error:
-                logger.error(f"Unexpected session error: {session_error}", exc_info=True)
+                logger.error(
+                    f"Unexpected session error: {session_error}", exc_info=True
+                )
                 yield {
                     "type": "error",
-                    "data": {"error": f"Session error: {str(session_error)}"}
+                    "data": {"error": f"Session error: {str(session_error)}"},
                 }
                 return
-            
+
             # Stream events directly from the agent as they arrive
             # This prevents the WebSocket from timing out while waiting for all events
             logger.info(f"Starting async agent stream for session {session_id}")
-            
+
             event_count = 0
             last_event_time = asyncio.get_event_loop().time()
             EVENT_TIMEOUT = 120.0  # 120 seconds max between events
-            
+
             try:
                 agent_stream = runner.run_async(
-                    user_id=user_id,
-                    session_id=session_id,
-                    new_message=content
+                    user_id=user_id, session_id=session_id, new_message=content
                 )
-                
+
                 async for event in agent_stream:
                     # Update last event time
                     last_event_time = asyncio.get_event_loop().time()
-                    
+
                     event_count += 1
                     event_type = type(event).__name__
                     logger.info(f"[Token Streaming] Event {event_count}: {event_type}")
-                    
+
                     # Extract text from content
-                    if hasattr(event, 'content') and event.content:
-                        if hasattr(event.content, 'parts'):
+                    if hasattr(event, "content") and event.content:
+                        if hasattr(event.content, "parts"):
                             for part_idx, part in enumerate(event.content.parts):
                                 part_type = type(part).__name__
-                                logger.debug(f"[Token Streaming] Event {event_count}, Part {part_idx}: {part_type}")
-                                
+                                logger.debug(
+                                    f"[Token Streaming] Event {event_count}, Part {part_idx}: {part_type}"
+                                )
+
                                 # Extract text and stream as tokens
-                                if hasattr(part, 'text') and part.text:
+                                if hasattr(part, "text") and part.text:
                                     try:
                                         text = part.text
-                                        logger.info(f"[Token Streaming] Streaming text: {text[:100]}... (length: {len(text)})")
+                                        logger.info(
+                                            f"[Token Streaming] Streaming text: {text[:100]}... (length: {len(text)})"
+                                        )
 
-                                        segments, in_reasoning_phase = self._segment_stream_text(
-                                            text=text,
-                                            in_reasoning_phase=in_reasoning_phase,
-                                            is_reasoning_model=is_reasoning_model
+                                        segments, in_reasoning_phase = (
+                                            self._segment_stream_text(
+                                                text=text,
+                                                in_reasoning_phase=in_reasoning_phase,
+                                                is_reasoning_model=is_reasoning_model,
+                                            )
                                         )
 
                                         if not segments:
-                                            logger.debug("[Token Streaming] No streamable text segments detected")
+                                            logger.debug(
+                                                "[Token Streaming] No streamable text segments detected"
+                                            )
                                             continue
 
                                         tokens_streamed_for_part = 0
 
-                                        for segment_index, (segment_type, segment_text) in enumerate(segments):
+                                        for segment_index, (
+                                            segment_type,
+                                            segment_text,
+                                        ) in enumerate(segments):
                                             # Whitespace-preserving tokenization: iterate over runs of whitespace and non-whitespace
                                             # This preserves all whitespace (spaces, newlines, tabs) unlike split() which collapses them
-                                            tokens = re.findall(r'\S+|\s+', segment_text)
+                                            tokens = re.findall(
+                                                r"\S+|\s+", segment_text
+                                            )
                                             if not tokens:
                                                 continue
 
@@ -831,7 +888,7 @@ class ADKAgentWrapper:
                                                 "[Token Streaming] Segment %s type=%s token_count=%s",
                                                 segment_index + 1,
                                                 segment_type,
-                                                len(tokens)
+                                                len(tokens),
                                             )
 
                                             for token_idx, token in enumerate(tokens):
@@ -844,8 +901,8 @@ class ADKAgentWrapper:
                                                             "type": "reasoning_token",
                                                             "data": {
                                                                 "token": token,
-                                                                "cumulative_reasoning": current_reasoning
-                                                            }
+                                                                "cumulative_reasoning": current_reasoning,
+                                                            },
                                                         }
                                                     else:
                                                         current_response += token
@@ -853,18 +910,20 @@ class ADKAgentWrapper:
                                                             "type": "token",
                                                             "data": {
                                                                 "token": token,
-                                                                "cumulative_response": current_response
-                                                            }
+                                                                "cumulative_response": current_response,
+                                                            },
                                                         }
 
                                                     tokens_streamed_for_part += 1
                                                     # Only delay on non-whitespace tokens to avoid delaying on pure whitespace
                                                     if token.strip():
-                                                        await asyncio.sleep(stream_delay_seconds)
+                                                        await asyncio.sleep(
+                                                            stream_delay_seconds
+                                                        )
                                                 except Exception as token_yield_error:
                                                     logger.error(
                                                         f"Error yielding token {token_idx}: {token_yield_error}",
-                                                        exc_info=True
+                                                        exc_info=True,
                                                     )
                                                     continue
 
@@ -874,225 +933,257 @@ class ADKAgentWrapper:
                                                 "(reasoning_chars=%s, response_chars=%s)",
                                                 tokens_streamed_for_part,
                                                 len(current_reasoning),
-                                                len(current_response)
+                                                len(current_response),
                                             )
                                         else:
-                                            logger.debug("[Token Streaming] No tokens emitted for this part")
+                                            logger.debug(
+                                                "[Token Streaming] No tokens emitted for this part"
+                                            )
                                     except Exception as text_processing_error:
-                                        logger.error(f"Error processing text part: {text_processing_error}", exc_info=True)
+                                        logger.error(
+                                            f"Error processing text part: {text_processing_error}",
+                                            exc_info=True,
+                                        )
                                         yield {
                                             "type": "error",
                                             "data": {
                                                 "error": f"Error processing response text: {str(text_processing_error)}",
-                                                "partial_response": current_response
-                                            }
+                                                "partial_response": current_response,
+                                            },
                                         }
                                         # Continue to next part
                                         continue
-                                
+
                                 # Check for function call (tool usage)
-                                if hasattr(part, 'function_call'):
+                                if hasattr(part, "function_call"):
                                     func_call = part.function_call
                                     if func_call:
-                                        tool_name = func_call.name if hasattr(func_call, 'name') else 'unknown_tool'
-                                        logger.info(f"[Token Streaming] Tool call detected: {tool_name}")
+                                        tool_name = (
+                                            func_call.name
+                                            if hasattr(func_call, "name")
+                                            else "unknown_tool"
+                                        )
+                                        logger.info(
+                                            f"[Token Streaming] Tool call detected: {tool_name}"
+                                        )
                                         yield {
                                             "type": "tool_call",
                                             "data": {
                                                 "message": f"{tool_name}: Called tool"
-                                            }
+                                            },
                                         }
-                
-                logger.info(f"[Token Streaming] Completed streaming {event_count} events")
-                
+
+                logger.info(
+                    f"[Token Streaming] Completed streaming {event_count} events"
+                )
+
             except asyncio.CancelledError:
                 logger.warning("[Token Streaming] Stream cancelled by client")
-                yield {
-                    "type": "error",
-                    "data": {"error": "Stream cancelled by client"}
-                }
+                yield {"type": "error", "data": {"error": "Stream cancelled by client"}}
                 return
             except asyncio.TimeoutError:
-                logger.error(f"[Token Streaming] Timeout after {EVENT_TIMEOUT}s waiting for model response")
+                logger.error(
+                    f"[Token Streaming] Timeout after {EVENT_TIMEOUT}s waiting for model response"
+                )
                 yield {
                     "type": "error",
                     "data": {
                         "error": f"Model response timeout after {EVENT_TIMEOUT}s. The model may be too large or busy.",
-                        "suggestion": "Try a smaller model or wait and retry"
-                    }
+                        "suggestion": "Try a smaller model or wait and retry",
+                    },
                 }
                 return
             except ConnectionError as conn_error:
-                logger.error(f"[Token Streaming] Connection error: {conn_error}", exc_info=True)
+                logger.error(
+                    f"[Token Streaming] Connection error: {conn_error}", exc_info=True
+                )
                 yield {
                     "type": "error",
                     "data": {
                         "error": f"Connection error: {str(conn_error)}",
-                        "suggestion": "Check if Ollama is running and accessible"
-                    }
+                        "suggestion": "Check if Ollama is running and accessible",
+                    },
                 }
                 return
             except Exception as stream_error:
                 error_type = type(stream_error).__name__
                 error_msg = str(stream_error)
-                logger.error(f"[Token Streaming] {error_type} during agent stream: {error_msg}", exc_info=True)
-                
+                logger.error(
+                    f"[Token Streaming] {error_type} during agent stream: {error_msg}",
+                    exc_info=True,
+                )
+
                 # Provide more helpful error messages based on error type
                 if "model" in error_msg.lower() and "not found" in error_msg.lower():
                     yield {
                         "type": "error",
                         "data": {
                             "error": f"Model not found: {model}",
-                            "suggestion": "Check if the model is installed in Ollama. Run: ollama pull " + (model or "qwen3:4b")
-                        }
+                            "suggestion": "Check if the model is installed in Ollama. Run: ollama pull "
+                            + (model or "qwen3:4b"),
+                        },
                     }
-                elif "connection" in error_msg.lower() or "connect" in error_msg.lower():
+                elif (
+                    "connection" in error_msg.lower() or "connect" in error_msg.lower()
+                ):
                     yield {
                         "type": "error",
                         "data": {
                             "error": "Cannot connect to Ollama",
-                            "suggestion": "Ensure Ollama is running: ollama serve"
-                        }
+                            "suggestion": "Ensure Ollama is running: ollama serve",
+                        },
                     }
                 elif "memory" in error_msg.lower() or "oom" in error_msg.lower():
                     yield {
                         "type": "error",
                         "data": {
                             "error": "Out of memory",
-                            "suggestion": "Try a smaller model or free up system resources"
-                        }
+                            "suggestion": "Try a smaller model or free up system resources",
+                        },
                     }
                 else:
                     yield {
                         "type": "error",
                         "data": {
                             "error": f"{error_type}: {error_msg}",
-                            "suggestion": "Check the backend logs for more details"
-                        }
+                            "suggestion": "Check the backend logs for more details",
+                        },
                     }
                 return
-            
+
             # Send completion signal with model info and pipeline metrics/metadata
-            logger.info(f"[Token Streaming] Sending completion signal (model: {resolved_model})")
-            reasoning_length = len(current_reasoning.strip()) if current_reasoning.strip() else 0
+            logger.info(
+                f"[Token Streaming] Sending completion signal (model: {resolved_model})"
+            )
+            reasoning_length = (
+                len(current_reasoning.strip()) if current_reasoning.strip() else 0
+            )
             response_length = len(current_response.strip())
 
             complete_data = {
                 "model": resolved_model,
                 "reasoning_length": reasoning_length if is_reasoning_model else 0,
-                "response_length": response_length
+                "response_length": response_length,
             }
-            
+
             # Include pipeline metrics, metadata, and enabled techniques if available
             if pipeline_metrics is not None:
                 complete_data["pipeline_metrics"] = pipeline_metrics
                 logger.debug(f"Including pipeline metrics: {pipeline_metrics}")
-            
+
             if pipeline_metadata is not None:
                 complete_data["pipeline_metadata"] = pipeline_metadata
-                logger.debug(f"Including pipeline metadata: {list(pipeline_metadata.keys())}")
-            
+                logger.debug(
+                    f"Including pipeline metadata: {list(pipeline_metadata.keys())}"
+                )
+
             if enabled_techniques is not None:
                 complete_data["enabled_techniques"] = enabled_techniques
                 logger.debug(f"Including enabled techniques: {enabled_techniques}")
 
-            yield {
-                "type": "complete",
-                "data": complete_data
-            }
-            
+            yield {"type": "complete", "data": complete_data}
+
         except Exception as e:
             logger.error(f"Error in token streaming: {e}", exc_info=True)
-            yield {
-                "type": "error",
-                "data": {"error": str(e)}
-            }
-    
+            yield {"type": "error", "data": {"error": str(e)}}
+
     async def process_message_stream(
         self,
         message: str,
         session_id: Optional[str] = None,
         model: Optional[str] = None,
-        config: Optional[ContextEngineeringConfig] = None
+        config: Optional[ContextEngineeringConfig] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Process a message through the ADK agent with streaming updates.
-        
+
         Yields events as the agent processes the message:
         - thinking: Agent thinking steps
         - tool_call: Tool invocation
         - response: Final response
-        
+
         Args:
             message: User's message
             session_id: Optional session ID
             model: Optional model name to use (e.g., "qwen3:4b", "llama2:7b")
             config: Optional context engineering configuration
-            
+
         Yields:
             Event dictionaries with type and data
         """
-        logger.info(f"Processing message with streaming (model: '{model or 'default'}'): {message[:50]}...")
-        
+        logger.info(
+            f"Processing message with streaming (model: '{model or 'default'}'): {message[:50]}..."
+        )
+
         try:
             # Get the appropriate runner for the specified model and config
             runner = self._get_or_create_runner(model, config)
-            
+
             # Track the resolved model (use "default" if model is None)
             resolved_model = model if model else "default"
-            
+
             # Generate unique IDs if needed
             if not session_id:
                 session_id = f"session-{uuid.uuid4().hex[:8]}"
             user_id = "api-user"
-            
+
             # Send initial thinking event
             yield {
                 "type": "thinking",
-                "data": {"message": "Processing your request..."}
+                "data": {"message": "Processing your request..."},
             }
-            
+
             # Initialize context engineering pipeline if config provided
             pipeline = None
             pipeline_context = None
             pipeline_metrics = {}
-            
+
             if config:
-                logger.info(f"Initializing context engineering pipeline with config: {config.get_enabled_techniques()}")
+                logger.info(
+                    f"Initializing context engineering pipeline with config: {config.get_enabled_techniques()}"
+                )
                 pipeline = ContextPipeline(config)
-                
+
                 yield {
                     "type": "thinking",
-                    "data": {"message": f"Running context engineering modules: {', '.join(config.get_enabled_techniques())}"}
+                    "data": {
+                        "message": f"Running context engineering modules: {', '.join(config.get_enabled_techniques())}"
+                    },
                 }
-                
+
                 # Process message through pipeline before sending to agent
                 pipeline_context = pipeline.process(
                     query=message,
-                    conversation_history=[]  # TODO: Get from session in future
+                    conversation_history=[],  # TODO: Get from session in future
                 )
-                
+
                 # Get pipeline metrics
                 pipeline_metrics = pipeline.get_aggregated_metrics()
-                logger.info(f"Pipeline processed in {pipeline_metrics.get('total_execution_time_ms', 0):.2f}ms")
-                
+                logger.info(
+                    f"Pipeline processed in {pipeline_metrics.get('total_execution_time_ms', 0):.2f}ms"
+                )
+
                 # If pipeline modified the context, use the enriched version
                 if pipeline_context.context:
-                    enriched_message = f"{pipeline_context.context}\n\nUser Query: {message}"
-                    logger.info(f"Enriched message with pipeline context ({len(pipeline_context.context)} chars)")
+                    enriched_message = (
+                        f"{pipeline_context.context}\n\nUser Query: {message}"
+                    )
+                    logger.info(
+                        f"Enriched message with pipeline context ({len(pipeline_context.context)} chars)"
+                    )
                 else:
                     enriched_message = message
             else:
                 enriched_message = message
-            
+
             # Ensure session exists before running agent
             try:
                 # Try to get existing session
                 _existing_session = await asyncio.to_thread(
                     self.session_service.get_session_sync,
-                    app_name='agents',
+                    app_name="agents",
                     user_id=user_id,
-                    session_id=session_id
+                    session_id=session_id,
                 )
                 logger.info(f"Using existing session: {session_id}")
             except Exception as _get_error:
@@ -1100,54 +1191,52 @@ class ADKAgentWrapper:
                 logger.info(f"Session not found, creating new session: {session_id}")
                 new_session = await asyncio.to_thread(
                     self.session_service.create_session_sync,
-                    app_name='agents',
+                    app_name="agents",
                     user_id=user_id,
-                    session_id=session_id
+                    session_id=session_id,
                 )
                 logger.info(f"Created new session: {new_session.id}")
-            
+
             # Create message content (use enriched message if pipeline was used)
             content = types.Content(
-                role='user',
-                parts=[types.Part(text=enriched_message)]
+                role="user", parts=[types.Part(text=enriched_message)]
             )
-            
+
             # Run agent and stream events using the model-specific runner
             events = await asyncio.to_thread(
-                runner.run,
-                user_id=user_id,
-                session_id=session_id,
-                new_message=content
+                runner.run, user_id=user_id, session_id=session_id, new_message=content
             )
-            
+
             # Stream events to client
             response_text = ""
             tool_calls = []
             thinking_steps = []
-            
+
             for event in events:
                 # Yield event info
                 event_type = type(event).__name__
-                
-                if 'tool' in event_type.lower():
+
+                if "tool" in event_type.lower():
                     tool_call_data = {
                         "name": event_type,
                         "description": f"Tool invocation: {event_type}",
-                        "timestamp": datetime.utcnow().isoformat()
+                        "timestamp": datetime.utcnow().isoformat(),
                     }
                     tool_calls.append(tool_call_data)
                     yield {
                         "type": "tool_call",
-                        "data": {"message": f"{event_type}: Tool invocation: {event_type}"}
+                        "data": {
+                            "message": f"{event_type}: Tool invocation: {event_type}"
+                        },
                     }
-                
+
                 # Extract text from content
-                if hasattr(event, 'content') and event.content:
-                    if hasattr(event.content, 'parts'):
+                if hasattr(event, "content") and event.content:
+                    if hasattr(event.content, "parts"):
                         for part in event.content.parts:
-                            if hasattr(part, 'text') and part.text:
+                            if hasattr(part, "text") and part.text:
                                 response_text = part.text
-            
+
             # Send final response
             response_data = {
                 "response": response_text,
@@ -1155,51 +1244,43 @@ class ADKAgentWrapper:
                 "tool_calls": tool_calls,
                 "model": resolved_model,
                 "pipeline_metrics": pipeline_metrics if pipeline_metrics else None,
-                "enabled_techniques": config.get_enabled_techniques() if config else []
+                "enabled_techniques": config.get_enabled_techniques() if config else [],
             }
-            
+
             # Include pipeline metadata if available
             if pipeline_context:
                 response_data["pipeline_metadata"] = pipeline_context.metadata
-            
-            yield {
-                "type": "response",
-                "data": response_data
-            }
-            
+
+            yield {"type": "response", "data": response_data}
+
         except Exception as e:
             logger.error(f"Error in streaming: {e}", exc_info=True)
-            yield {
-                "type": "error",
-                "data": {"error": str(e)}
-            }
-    
-    def _parse_agent_output(self, output: str, include_thinking: bool) -> Dict[str, Any]:
+            yield {"type": "error", "data": {"error": str(e)}}
+
+    def _parse_agent_output(
+        self, output: str, include_thinking: bool
+    ) -> Dict[str, Any]:
         """
         Parse ADK agent output to extract response, thinking, and tool calls.
-        
+
         Args:
             output: Raw agent output
             include_thinking: Whether to include thinking steps
-            
+
         Returns:
             Parsed response data
         """
-        response_data = {
-            "response": "",
-            "thinking_steps": [],
-            "tool_calls": []
-        }
-        
+        response_data = {"response": "", "thinking_steps": [], "tool_calls": []}
+
         lines = output.split("\n")
-        
+
         # Extract thinking steps
         in_thinking = False
         thinking_buffer = []
-        
+
         for line in lines:
             line = line.strip()
-            
+
             # Detect thinking blocks
             if "<think>" in line:
                 in_thinking = True
@@ -1210,10 +1291,10 @@ class ADKAgentWrapper:
                     response_data["thinking_steps"].append(" ".join(thinking_buffer))
                     thinking_buffer = []
                 continue
-            
+
             if in_thinking:
                 thinking_buffer.append(line)
-            
+
             # Detect tool calls
             if "tool_call:" in line.lower() or "calling tool:" in line.lower():
                 # Extract tool name from line if possible
@@ -1222,16 +1303,16 @@ class ADKAgentWrapper:
                     parts = line.split(":", 1)
                     if len(parts) > 1:
                         tool_name = parts[0].strip().replace("tool_call", "").strip()
-                
-                response_data["tool_calls"].append({
-                    "name": tool_name,
-                    "description": line
-                })
-        
+
+                response_data["tool_calls"].append(
+                    {"name": tool_name, "description": line}
+                )
+
         # Extract final response (usually the last substantial output)
         # Filter out empty lines and metadata
         response_lines = [
-            line for line in lines
+            line
+            for line in lines
             if line.strip()
             and not line.startswith("INFO:")
             and not line.startswith("DEBUG:")
@@ -1239,16 +1320,20 @@ class ADKAgentWrapper:
             and "</think>" not in line
             and "tool_call:" not in line.lower()
         ]
-        
+
         if response_lines:
-            response_data["response"] = "\n".join(response_lines[-5:])  # Last 5 lines as response
-        
+            response_data["response"] = "\n".join(
+                response_lines[-5:]
+            )  # Last 5 lines as response
+
         if not include_thinking:
             response_data["thinking_steps"] = None
-        
+
         return response_data
-    
-    def get_available_tools(self, config: Optional[ContextEngineeringConfig] = None) -> List[Dict[str, Any]]:
+
+    def get_available_tools(
+        self, config: Optional[ContextEngineeringConfig] = None
+    ) -> List[Dict[str, Any]]:
         """
         Get list of available tools from the ADK agent.
 
@@ -1266,19 +1351,16 @@ class ADKAgentWrapper:
                 "parameters": {
                     "expression": {
                         "type": "string",
-                        "description": "Mathematical expression to evaluate"
+                        "description": "Mathematical expression to evaluate",
                     }
-                }
+                },
             },
             {
                 "name": "count_words",
                 "description": "Count words in a text string",
                 "parameters": {
-                    "text": {
-                        "type": "string",
-                        "description": "Text to count words in"
-                    }
-                }
+                    "text": {"type": "string", "description": "Text to count words in"}
+                },
             },
             {
                 "name": "get_current_time",
@@ -1286,49 +1368,48 @@ class ADKAgentWrapper:
                 "parameters": {
                     "timezone": {
                         "type": "string",
-                        "description": "Timezone name (e.g., 'America/New_York')"
+                        "description": "Timezone name (e.g., 'America/New_York')",
                     }
-                }
+                },
             },
             {
                 "name": "analyze_text",
                 "description": "Analyze text and provide statistics",
                 "parameters": {
-                    "text": {
-                        "type": "string",
-                        "description": "Text to analyze"
-                    }
-                }
-            }
+                    "text": {"type": "string", "description": "Text to analyze"}
+                },
+            },
         ]
 
         # Add RAG-as-tool if enabled in configuration
         if config and config.rag_tool_enabled:
-            tools.append({
-                "name": "search_knowledge_base",
-                "description": "Search the knowledge base for relevant documents. Use PROACTIVELY for any question that could benefit from documentation or external information. Always try this before saying you don't have information.",
-                "parameters": {
-                    "query": {
-                        "type": "string",
-                        "description": "The search query describing what information you need"
+            tools.append(
+                {
+                    "name": "search_knowledge_base",
+                    "description": "Search the knowledge base for relevant documents. Use PROACTIVELY for any question that could benefit from documentation or external information. Always try this before saying you don't have information.",
+                    "parameters": {
+                        "query": {
+                            "type": "string",
+                            "description": "The search query describing what information you need",
+                        },
+                        "top_k": {
+                            "type": "integer",
+                            "description": "Number of documents to retrieve (default: 5)",
+                            "default": 5,
+                        },
                     },
-                    "top_k": {
-                        "type": "integer",
-                        "description": "Number of documents to retrieve (default: 5)",
-                        "default": 5
-                    }
                 }
-            })
+            )
 
         return tools
-    
+
     def get_tool_info(self, tool_name: str) -> Optional[Dict[str, Any]]:
         """
         Get detailed information about a specific tool.
-        
+
         Args:
             tool_name: Name of the tool
-            
+
         Returns:
             Tool information dictionary or None if not found
         """
@@ -1337,5 +1418,3 @@ class ADKAgentWrapper:
             if tool["name"] == tool_name:
                 return tool
         return None
-
-

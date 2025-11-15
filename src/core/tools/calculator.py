@@ -9,6 +9,9 @@ import ast
 import math
 import operator
 from typing import Any, Dict, Union
+import time
+
+from src.core.tracing import trace_function
 
 
 # Security limits for safe evaluation
@@ -120,6 +123,7 @@ def _safe_eval(node: ast.AST) -> Union[int, float]:
         raise ValueError(f"Expression type {type(node).__name__} not allowed")
 
 
+@trace_function(attributes={"tool": "calculate"})
 def calculate(expression: str) -> Dict[str, Any]:
     """
     Evaluate a limited arithmetic expression in a restricted, safe environment.

@@ -13,9 +13,11 @@ import subprocess
 import platform
 import shutil
 import asyncio
+import time
 
 from src.api.adk_wrapper import ADKAgentWrapper
 from src.evaluation.metrics import MetricsCollector
+from src.core.tracing import trace_span, record_metric, record_throughput, update_memory_usage
 from src.core.context_config import (
     ContextEngineeringConfig, 
     ConfigPreset,
@@ -104,82 +106,117 @@ async def chat(
     This endpoint provides synchronous chat interaction.
     For real-time streaming, use the WebSocket endpoint /api/chat/ws
     """
-    logger.debug(
-        "Received chat message for model %s", message.model or "default"
-    )
     
-    try:
-        # Parse config if provided
-        context_config = None
-        if message.config:
-            try:
-                context_config = ContextEngineeringConfig.from_dict(message.config)
-            except (ValueError, TypeError, KeyError) as config_error:
-                error_msg = f"Invalid configuration: {str(config_error)}"
-                logger.error(
-                    "Configuration parsing failed: %s. Config data: %s",
-                    config_error,
-                    message.config,
-                    exc_info=True
-                )
-                raise HTTPException(
-                    status_code=400,
-                    detail={
-                        "error": "invalid_configuration",
-                        "message": error_msg,
-                        "details": str(config_error)
-                    }
-                )
+    start_time = time.time()
+    
+    # Record throughput
+    record_throughput({"endpoint": "/api/chat"})
+    
+    with trace_span(
+        "api.chat.post",
+        attributes={
+            "endpoint": "/api/chat",
+            "model": message.model or "default",
+            "session_id": message.session_id or "none",
+            "message_length": len(message.message),
+            "include_thinking": message.include_thinking
+        }
+    ) as span:
+        logger.debug(
+            "Received chat message for model %s", message.model or "default"
+        )
+        
+        try:
+            # Parse config if provided
+            context_config = None
+            if message.config:
+                try:
+                    context_config = ContextEngineeringConfig.from_dict(message.config)
+                except (ValueError, TypeError, KeyError) as config_error:
+                    error_msg = f"Invalid configuration: {str(config_error)}"
+                    logger.error(
+                        "Configuration parsing failed: %s. Config data: %s",
+                        config_error,
+                        message.config,
+                        exc_info=True
+                    )
+                    raise HTTPException(
+                        status_code=400,
+                        detail={
+                            "error": "invalid_configuration",
+                            "message": error_msg,
+                            "details": str(config_error)
+                        }
+                    )
+                
+                # Validate configuration
+                validation_errors = context_config.validate()
+                if validation_errors:
+                    error_msg = f"Configuration validation failed: {validation_errors}"
+                    logger.error(
+                        "Configuration validation failed: %s. Config data: %s",
+                        validation_errors,
+                        message.config,
+                        exc_info=True
+                    )
+                    raise HTTPException(
+                        status_code=400,
+                        detail={
+                            "error": "invalid_configuration",
+                            "message": error_msg,
+                            "details": str(validation_errors)
+                        }
+                    )
             
-            # Validate configuration
-            validation_errors = context_config.validate()
-            if validation_errors:
-                error_msg = f"Configuration validation failed: {validation_errors}"
-                logger.error(
-                    "Configuration validation failed: %s. Config data: %s",
-                    validation_errors,
-                    message.config,
-                    exc_info=True
-                )
-                raise HTTPException(
-                    status_code=400,
-                    detail={
-                        "error": "invalid_configuration",
-                        "message": error_msg,
-                        "details": str(validation_errors)
-                    }
-                )
+            # Process message through ADK agent with specified model and config
+            result = await adk_wrapper.process_message(
+                message=message.message,
+                session_id=message.session_id,
+                include_thinking=message.include_thinking,
+                model=message.model,
+                config=context_config
+            )
+                
+                # Collect metrics
+            metrics = metrics_collector.collect_response_metrics(result)
+            
+            # Record latency
+            latency_ms = (time.time() - start_time) * 1000
+            record_metric("latency", latency_ms, {
+                "endpoint": "/api/chat",
+                "model": message.model or "default"
+            })
+            
+            # Record tokens if available
+            if "token_count" in metrics:
+                record_metric("tokens_per_query", float(metrics["token_count"]), {
+                    "endpoint": "/api/chat",
+                    "model": message.model or "default"
+                })
+            
+            span.set_attribute("response_length", len(result.get("response", "")))
+            span.set_attribute("latency_ms", latency_ms)
+            span.set_attribute("tool_calls_count", len(result.get("tool_calls", []) or []) or 0)
         
-        # Process message through ADK agent with specified model and config
-        result = await adk_wrapper.process_message(
-            message=message.message,
-            session_id=message.session_id,
-            include_thinking=message.include_thinking,
-            model=message.model,
-            config=context_config
-        )
-        
-        # Collect metrics
-        metrics = metrics_collector.collect_response_metrics(result)
+            # Extract pipeline metrics from result if available
+            metrics_data = result.get("metrics")
+            pipeline_metrics = metrics_data.get("pipeline_metrics") if isinstance(metrics_data, dict) else None
 
-        # Extract pipeline metrics from result if available
-        metrics_data = result.get("metrics")
-        pipeline_metrics = metrics_data.get("pipeline_metrics") if isinstance(metrics_data, dict) else None
-
-        return ChatResponse(
-            response=result.get("response", ""),
-            thinking_steps=result.get("thinking_steps"),
-            tool_calls=result.get("tool_calls"),
-            metrics=metrics,
-            timestamp=datetime.now(timezone.utc).isoformat(),
-            model=result.get("model", message.model),
-            pipeline_metadata=result.get("pipeline_metadata"),
-            pipeline_metrics=pipeline_metrics,
-        )
-        
-    except Exception as e:
-        logger.error(f"Error processing chat message: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+            return ChatResponse(
+                response=result.get("response", ""),
+                thinking_steps=result.get("thinking_steps"),
+                tool_calls=result.get("tool_calls"),
+                metrics=metrics,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                model=result.get("model", message.model),
+                pipeline_metadata=result.get("pipeline_metadata"),
+                pipeline_metrics=pipeline_metrics,
+            )
+            
+        except Exception as e:
+            span.set_attribute("error", str(e))
+            logger.error(f"Error processing chat message: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @chat_router.websocket("/chat/ws")
@@ -203,14 +240,19 @@ async def chat_websocket(websocket: WebSocket):
         "timestamp": "ISO-8601 timestamp"
     }
     """
+    
     await websocket.accept()
     logger.info("WebSocket connection established")
+    
+    # Record throughput
+    record_throughput({"endpoint": "/api/chat/ws"})
     
     # Get dependencies from app state
     adk_wrapper = websocket.app.state.adk_wrapper
     
     try:
         while True:
+            start_time = time.time()
             # Receive message from client
             data = await websocket.receive_text()
             
@@ -244,108 +286,128 @@ async def chat_websocket(websocket: WebSocket):
             enable_token_streaming = message_data.get("enableTokenStreaming", False)
             logger.info(f"Processing WebSocket message with model: {selected_model or 'default'}, token_streaming: {enable_token_streaming}")
             
-            # Parse config if provided
-            context_config = None
-            if message_data.get("config"):
-                try:
-                    context_config = ContextEngineeringConfig.from_dict(message_data["config"])
-                except (ValueError, TypeError, KeyError) as config_error:
-                    error_msg = f"Invalid configuration: {str(config_error)}"
-                    logger.error(
-                        "WebSocket configuration parsing failed: %s. Config data: %s",
-                        config_error,
-                        message_data.get("config"),
-                        exc_info=True
-                    )
-                    await websocket.send_json({
-                        "type": "error",
-                        "data": {
-                            "error": "invalid_configuration",
-                            "message": error_msg,
-                            "details": str(config_error)
-                        },
-                        "timestamp": datetime.now(timezone.utc).isoformat()
-                    })
-                    continue
+            with trace_span(
+                "api.chat.websocket",
+                attributes={
+                    "endpoint": "/api/chat/ws",
+                    "model": selected_model or "default",
+                    "session_id": message_data.get("session_id", "none"),
+                    "message_length": len(message_data.get("message", ""))
+                }
+            ) as span:
+                event_count = 0
+                # Parse config if provided
+                context_config = None
+                if message_data.get("config"):
+                    try:
+                        context_config = ContextEngineeringConfig.from_dict(message_data["config"])
+                    except (ValueError, TypeError, KeyError) as config_error:
+                        error_msg = f"Invalid configuration: {str(config_error)}"
+                        logger.error(
+                            "WebSocket configuration parsing failed: %s. Config data: %s",
+                            config_error,
+                            message_data.get("config"),
+                            exc_info=True
+                        )
+                        await websocket.send_json({
+                            "type": "error",
+                            "data": {
+                                "error": "invalid_configuration",
+                                "message": error_msg,
+                                "details": str(config_error)
+                            },
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        })
+                        continue
+                    
+                    # Validate configuration
+                    validation_errors = context_config.validate()
+                    if validation_errors:
+                        error_msg = f"Configuration validation failed: {validation_errors}"
+                        logger.error(
+                            "WebSocket configuration validation failed: %s. Config data: %s",
+                            validation_errors,
+                            message_data.get("config"),
+                            exc_info=True
+                        )
+                        await websocket.send_json({
+                            "type": "error",
+                            "data": {
+                                "error": "invalid_configuration",
+                                "message": error_msg,
+                                "details": str(validation_errors)
+                            },
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        })
+                        continue
                 
-                # Validate configuration
-                validation_errors = context_config.validate()
-                if validation_errors:
-                    error_msg = f"Configuration validation failed: {validation_errors}"
-                    logger.error(
-                        "WebSocket configuration validation failed: %s. Config data: %s",
-                        validation_errors,
-                        message_data.get("config"),
-                        exc_info=True
-                    )
-                    await websocket.send_json({
-                        "type": "error",
-                        "data": {
-                            "error": "invalid_configuration",
-                            "message": error_msg,
-                            "details": str(validation_errors)
-                        },
-                        "timestamp": datetime.now(timezone.utc).isoformat()
-                    })
-                    continue
-            
-            # Process message with streaming (choose method based on token streaming preference)
-            try:
-                if enable_token_streaming:
-                    logger.info("Using token-level streaming mode")
-                    # Token streaming mode - yields individual tokens
-                    async for event in adk_wrapper.process_message_stream_tokens(
-                        message=message_data["message"],
-                        session_id=message_data.get("session_id"),
-                        model=selected_model,
-                        config=context_config
-                    ):
-                        try:
-                            await websocket.send_json({
-                                "type": event["type"],
-                                "data": event["data"],
-                                "timestamp": datetime.now(timezone.utc).isoformat()
-                            })
-                        except Exception as send_error:
-                            logger.error(f"Error sending event to WebSocket: {send_error}", exc_info=True)
-                            # If we can't send, break the loop
-                            break
-                else:
-                    logger.info("Using standard streaming mode")
-                    # Standard streaming mode - yields complete text chunks
-                    async for event in adk_wrapper.process_message_stream(
-                        message=message_data["message"],
-                        session_id=message_data.get("session_id"),
-                        model=selected_model,
-                        config=context_config
-                    ):
-                        try:
-                            await websocket.send_json({
-                                "type": event["type"],
-                                "data": event["data"],
-                                "timestamp": datetime.now(timezone.utc).isoformat()
-                            })
-                        except Exception as send_error:
-                            logger.error(f"Error sending event to WebSocket: {send_error}", exc_info=True)
-                            # If we can't send, break the loop
-                            break
-                
-                # Send completion signal (if not already sent by streaming method)
-                # Note: The streaming methods now send their own complete signals
-                logger.debug("WebSocket message processing complete")
-            except Exception as stream_error:
-                logger.error(f"Error in streaming loop: {stream_error}", exc_info=True)
-                # Try to send error to client before re-raising
+                # Process message with streaming (choose method based on token streaming preference)
                 try:
-                    await websocket.send_json({
-                        "type": "error",
-                        "data": {"error": f"Streaming error: {str(stream_error)}"},
-                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    if enable_token_streaming:
+                        logger.info("Using token-level streaming mode")
+                        # Token streaming mode - yields individual tokens
+                        async for event in adk_wrapper.process_message_stream_tokens(
+                            message=message_data["message"],
+                            session_id=message_data.get("session_id"),
+                            model=selected_model,
+                            config=context_config
+                        ):
+                            event_count += 1
+                            try:
+                                await websocket.send_json({
+                                    "type": event["type"],
+                                    "data": event["data"],
+                                    "timestamp": datetime.now(timezone.utc).isoformat()
+                                })
+                            except Exception as send_error:
+                                logger.error(f"Error sending event to WebSocket: {send_error}", exc_info=True)
+                                # If we can't send, break the loop
+                                break
+                    else:
+                        logger.info("Using standard streaming mode")
+                        # Standard streaming mode - yields complete text chunks
+                
+                        async for event in adk_wrapper.process_message_stream(
+                            message=message_data["message"],
+                            session_id=message_data.get("session_id"),
+                            model=selected_model,
+                        config=context_config
+                        ):
+                            event_count += 1
+                            try:
+                                await websocket.send_json({
+                                    "type": event["type"],
+                                    "data": event["data"],
+                                    "timestamp": datetime.now(timezone.utc).isoformat()
+                                })
+                            except Exception as send_error:
+                                logger.error(f"Error sending event to WebSocket: {send_error}", exc_info=True)
+                                # If we can't send, break the loop
+                                break
+                    
+                    # Record latency
+                    latency_ms = (time.time() - start_time) * 1000
+                    span.set_attribute("latency_ms", latency_ms)
+                    record_metric("latency", latency_ms, {
+                         "endpoint": "/api/chat/ws",
+                         "model": selected_model or "default"
                     })
-                except Exception:
-                    pass  # If we can't send error, connection is likely already closed
-                raise  # Re-raise to be caught by outer handler
-            
+                    
+                    # Send completion signal (if not already sent by streaming method)
+                    # Note: The streaming methods now send their own complete signals
+                    logger.debug("WebSocket message processing complete")
+                except Exception as stream_error:
+                    logger.error(f"Error in streaming loop: {stream_error}", exc_info=True)
+                    # Try to send error to client before re-raising
+                    try:
+                        await websocket.send_json({
+                            "type": "error",
+                            "data": {"error": f"Streaming error: {str(stream_error)}"},
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        })
+                    except Exception:
+                        logger.debug("Failed to send streaming error to WebSocket, connection likely closed")
+                    raise  # Re-raise to be caught by outer handler
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected")
     except Exception as e:
@@ -377,15 +439,19 @@ async def get_metrics(
     - RAG metrics (Phase 2+)
     - Context engineering metrics
     """
-    try:
-        metrics = metrics_collector.get_all_metrics()
-        return {
-            "metrics": metrics,
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }
-    except Exception as e:
-        logger.error(f"Error fetching metrics: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+    with trace_span("api.metrics.get", attributes={"endpoint": "/api/metrics"}):
+        try:
+            # Update memory usage before returning metrics
+            update_memory_usage()
+            
+            metrics = metrics_collector.get_all_metrics()
+            return {
+                "metrics": metrics,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+        except Exception as e:
+            logger.error(f"Error fetching metrics: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail=str(e))
 
 
 @metrics_router.get("/metrics/phase/{phase_id}")
@@ -455,20 +521,21 @@ async def get_tools(
     Args:
         config: Optional configuration dict to determine which tools are available
     """
-    try:
-        # Parse config if provided
-        context_config = None
-        if config:
-            try:
-                context_config = ContextEngineeringConfig.from_dict(config)
-            except (ValueError, TypeError, KeyError) as config_error:
-                logger.warning(f"Invalid config in get_tools, using default: {config_error}")
+    with trace_span("api.tools.get", attributes={"endpoint": "/api/tools"}):
+        try:
+            # Parse config if provided
+            context_config = None
+            if config:
+                try:
+                    context_config = ContextEngineeringConfig.from_dict(config)
+                except (ValueError, TypeError, KeyError) as config_error:
+                    logger.warning(f"Invalid config in get_tools, using default: {config_error}")
 
-        tools = adk_wrapper.get_available_tools(context_config)
-        return tools
-    except Exception as e:
-        logger.error(f"Error fetching tools: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+            tools = adk_wrapper.get_available_tools(context_config)
+            return tools
+        except Exception as e:
+            logger.error(f"Error fetching tools: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail=str(e))
 
 
 @tools_router.get("/tools", response_model=List[ToolInfo])

@@ -9,7 +9,10 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from typing import Any, Dict
 
+from src.core.tracing import trace_function
 
+
+@trace_function(attributes={"tool": "get_current_time"})
 def get_current_time(city: str) -> Dict[str, Any]:
     """
     Return the current time for a given city name or timezone identifier.
