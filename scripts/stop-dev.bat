@@ -43,13 +43,10 @@ if defined BACKEND_PID (
 )
 
 REM Also kill any uvicorn processes on port 8000
-for /f "tokens=*" %%a in ('netstat -ano ^| findstr ":8000" ^| findstr "LISTENING"') do (
-    set "line=%%a"
-    set "PID="
-    for %%b in (!line!) do set "PID=%%b"
-    if defined PID (
-        echo [CLEANUP] Stopping process on port 8000 (PID: !PID!)...
-        taskkill /PID !PID! /F /T >nul 2>&1
+for /f "tokens=*" %%a in ('powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | Select-Object -Unique" 2^>nul') do (
+    if not "%%a"=="" (
+        echo [CLEANUP] Stopping process on port 8000 (PID: %%a)...
+        taskkill /PID %%a /F /T >nul 2>&1
     )
 )
 
