@@ -80,26 +80,28 @@ class EmbeddingService:
             logger.warning("Empty text provided for embedding")
             return [0.0] * self.embedding_dim
 
-        # Check cache
-        if text in self._embedding_cache:
-            # Move to end (most recently used)
-            self._embedding_cache.move_to_end(text)
-            self._cache_hits += 1
-            return self._embedding_cache[text]
+        # Check cache (thread-safe)
+        with self._lock:
+            if text in self._embedding_cache:
+                # Move to end (most recently used)
+                self._embedding_cache.move_to_end(text)
+                self._cache_hits += 1
+                return self._embedding_cache[text].copy()  # Return copy to avoid holding lock
 
-        # Generate embedding
+        # Generate embedding (outside lock to allow concurrent encoding)
         try:
             embedding = self.model.encode(text, convert_to_numpy=True)
             embedding_list = embedding.tolist()
 
-            # Update cache (with LRU eviction)
-            self._cache_misses += 1
-            if len(self._embedding_cache) >= self.cache_size:
-                # Remove least-recently-used entry (first item)
-                self._embedding_cache.popitem(last=False)
+            # Update cache (with LRU eviction) - thread-safe
+            with self._lock:
+                self._cache_misses += 1
+                if len(self._embedding_cache) >= self.cache_size:
+                    # Remove least-recently-used entry (first item)
+                    self._embedding_cache.popitem(last=False)
 
-            # Insert new entry at end (most recently used)
-            self._embedding_cache[text] = embedding_list
+                # Insert new entry at end (most recently used)
+                self._embedding_cache[text] = embedding_list
 
             return embedding_list
 
@@ -130,22 +132,23 @@ class EmbeddingService:
         if not texts:
             return []
 
-        # Filter out cached embeddings
+        # Filter out cached embeddings (thread-safe)
         uncached_texts = []
         uncached_indices = []
         results = [None] * len(texts)
 
-        for i, text in enumerate(texts):
-            if text in self._embedding_cache:
-                # Move to end (most recently used)
-                self._embedding_cache.move_to_end(text)
-                results[i] = self._embedding_cache[text]
-                self._cache_hits += 1
-            else:
-                uncached_texts.append(text)
-                uncached_indices.append(i)
+        with self._lock:
+            for i, text in enumerate(texts):
+                if text in self._embedding_cache:
+                    # Move to end (most recently used)
+                    self._embedding_cache.move_to_end(text)
+                    results[i] = self._embedding_cache[text].copy()  # Return copy to avoid holding lock
+                    self._cache_hits += 1
+                else:
+                    uncached_texts.append(text)
+                    uncached_indices.append(i)
 
-        # Generate embeddings for uncached texts
+        # Generate embeddings for uncached texts (outside lock to allow concurrent encoding)
         if uncached_texts:
             try:
                 embeddings = self.model.encode(
@@ -155,20 +158,21 @@ class EmbeddingService:
                     show_progress_bar=len(uncached_texts) > 100
                 )
 
-                # Store in cache and results
-                for i, (text, embedding) in enumerate(zip(uncached_texts, embeddings)):
-                    embedding_list = embedding.tolist()
-                    results[uncached_indices[i]] = embedding_list
+                # Store in cache and results (thread-safe)
+                with self._lock:
+                    for i, (text, embedding) in enumerate(zip(uncached_texts, embeddings)):
+                        embedding_list = embedding.tolist()
+                        results[uncached_indices[i]] = embedding_list
 
-                    # Update cache (with LRU eviction)
-                    if len(self._embedding_cache) >= self.cache_size:
-                        # Remove least-recently-used entry (first item)
-                        self._embedding_cache.popitem(last=False)
-                    
-                    # Insert new entry at end (most recently used)
-                    self._embedding_cache[text] = embedding_list
+                        # Update cache (with LRU eviction)
+                        if len(self._embedding_cache) >= self.cache_size:
+                            # Remove least-recently-used entry (first item)
+                            self._embedding_cache.popitem(last=False)
+                        
+                        # Insert new entry at end (most recently used)
+                        self._embedding_cache[text] = embedding_list
 
-                self._cache_misses += len(uncached_texts)
+                    self._cache_misses += len(uncached_texts)
 
             except Exception as e:
                 logger.error(f"Batch embedding failed: {e}", exc_info=True)
@@ -195,18 +199,20 @@ class EmbeddingService:
         Returns:
             Dictionary with cache stats
         """
-        total_requests = self._cache_hits + self._cache_misses
-        hit_rate = (
-            self._cache_hits / total_requests if total_requests > 0 else 0
-        )
+        # Thread-safe read of cache statistics
+        with self._lock:
+            total_requests = self._cache_hits + self._cache_misses
+            hit_rate = (
+                self._cache_hits / total_requests if total_requests > 0 else 0
+            )
 
-        return {
-            "cache_size": len(self._embedding_cache),
-            "max_cache_size": self.cache_size,
-            "cache_hits": self._cache_hits,
-            "cache_misses": self._cache_misses,
-            "hit_rate": hit_rate
-        }
+            return {
+                "cache_size": len(self._embedding_cache),
+                "max_cache_size": self.cache_size,
+                "cache_hits": self._cache_hits,
+                "cache_misses": self._cache_misses,
+                "hit_rate": hit_rate
+            }
 
     def compute_similarity(
         self,
