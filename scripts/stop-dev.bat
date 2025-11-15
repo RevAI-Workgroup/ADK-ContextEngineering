@@ -64,13 +64,10 @@ if defined FRONTEND_PID (
 )
 
 REM Also kill any vite/node processes on port 5173
-for /f "tokens=*" %%a in ('netstat -ano ^| findstr ":5173" ^| findstr "LISTENING"') do (
-    set "line=%%a"
-    set "PID="
-    for %%b in (!line!) do set "PID=%%b"
-    if defined PID (
-        echo [CLEANUP] Stopping process on port 5173 (PID: !PID!)...
-        taskkill /PID !PID! /F /T >nul 2>&1
+for /f "tokens=*" %%a in ('powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 5173 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess | Select-Object -Unique" 2^>nul') do (
+    if not "%%a"=="" (
+        echo [CLEANUP] Stopping process on port 5173 (PID: %%a)...
+        taskkill /PID %%a /F /T >nul 2>&1
     )
 )
 
