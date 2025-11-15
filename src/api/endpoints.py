@@ -169,34 +169,34 @@ async def chat(
                     )
             
             # Process message through ADK agent with specified model and config
-                result = await adk_wrapper.process_message(
-                    message=message.message,
-                    session_id=message.session_id,
-                    include_thinking=message.include_thinking,
-                    model=message.model,
+            result = await adk_wrapper.process_message(
+                message=message.message,
+                session_id=message.session_id,
+                include_thinking=message.include_thinking,
+                model=message.model,
                 config=context_config
-                )
+            )
                 
                 # Collect metrics
-                metrics = metrics_collector.collect_response_metrics(result)
-                
-                # Record latency
-                latency_ms = (time.time() - start_time) * 1000
-                record_metric("latency", latency_ms, {
+            metrics = metrics_collector.collect_response_metrics(result)
+            
+            # Record latency
+            latency_ms = (time.time() - start_time) * 1000
+            record_metric("latency", latency_ms, {
+                "endpoint": "/api/chat",
+                "model": message.model or "default"
+            })
+            
+            # Record tokens if available
+            if "token_count" in metrics:
+                record_metric("tokens_per_query", float(metrics["token_count"]), {
                     "endpoint": "/api/chat",
                     "model": message.model or "default"
                 })
-                
-                # Record tokens if available
-                if "token_count" in metrics:
-                    record_metric("tokens_per_query", float(metrics["token_count"]), {
-                        "endpoint": "/api/chat",
-                        "model": message.model or "default"
-                    })
-                
-                span.set_attribute("response_length", len(result.get("response", "")))
-                span.set_attribute("latency_ms", latency_ms)
-                span.set_attribute("tool_calls_count", len(result.get("tool_calls", []) or []) or 0)
+            
+            span.set_attribute("response_length", len(result.get("response", "")))
+            span.set_attribute("latency_ms", latency_ms)
+            span.set_attribute("tool_calls_count", len(result.get("tool_calls", []) or []) or 0)
         
             # Extract pipeline metrics from result if available
             metrics_data = result.get("metrics")
