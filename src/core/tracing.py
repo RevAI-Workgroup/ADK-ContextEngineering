@@ -282,7 +282,7 @@ def _initialize_metric_instruments() -> None:
     """
     Initialize all metric instruments.
     
-    Creates Counter, Histogram, and Gauge instruments for all tracked metrics.
+    Creates Counter and Histogram instruments for all tracked metrics.
     """
     global _meter, _metrics_instruments
     
@@ -314,17 +314,17 @@ def _initialize_metric_instruments() -> None:
         ),
         
         # Efficiency metrics
-        "latency_p50": _meter.create_gauge(
+        "latency_p50": _meter.create_histogram(
             "revai.efficiency.latency_p50",
             description="50th percentile latency in milliseconds",
             unit="ms"
         ),
-        "latency_p95": _meter.create_gauge(
+        "latency_p95": _meter.create_histogram(
             "revai.efficiency.latency_p95",
             description="95th percentile latency in milliseconds",
             unit="ms"
         ),
-        "latency_p99": _meter.create_gauge(
+        "latency_p99": _meter.create_histogram(
             "revai.efficiency.latency_p99",
             description="99th percentile latency in milliseconds",
             unit="ms"
@@ -351,12 +351,12 @@ def _initialize_metric_instruments() -> None:
             description="Number of requests processed",
             unit="requests"
         ),
-        "memory_usage": _meter.create_gauge(
+        "memory_usage": _meter.create_histogram(
             "revai.scalability.memory_usage",
             description="Memory usage in bytes",
             unit="bytes"
         ),
-        "index_size": _meter.create_gauge(
+        "index_size": _meter.create_histogram(
             "revai.scalability.index_size",
             description="Size of vector index in bytes",
             unit="bytes"
@@ -527,10 +527,6 @@ def record_metric(
                 # Histogram
                 instrument.record(value, attributes=labels)
                 logger.debug(f"Metric: revai.{name}={value:.2f}{labels_str}")
-            elif hasattr(instrument, 'set'):
-                # Gauge
-                instrument.set(value, attributes=labels)
-                logger.debug(f"Metric: revai.{name}={value:.2f}{labels_str}")
             elif hasattr(instrument, 'add'):
                 # Counter
                 instrument.add(int(value), attributes=labels)
@@ -605,10 +601,10 @@ def update_memory_usage() -> None:
         memory_info = process.memory_info()
         memory_bytes = float(memory_info.rss)
         
-        # Record to memory_usage gauge
-        memory_gauge = _metrics_instruments.get("memory_usage")
-        if memory_gauge:
-            memory_gauge.set(memory_bytes)
+        # Record to memory_usage histogram
+        memory_histogram = _metrics_instruments.get("memory_usage")
+        if memory_histogram:
+            memory_histogram.record(memory_bytes)
             logger.debug(f"Metric: revai.scalability.memory_usage={memory_bytes / 1024 / 1024:.1f}MB")
         
     except Exception as e:
@@ -643,17 +639,17 @@ def _update_latency_percentiles() -> None:
         p95 = sorted_latencies[p95_idx] if p95_idx < n else sorted_latencies[-1]
         p99 = sorted_latencies[p99_idx] if p99_idx < n else sorted_latencies[-1]
         
-        # Update gauge metrics
-        p50_gauge = _metrics_instruments.get("latency_p50")
-        p95_gauge = _metrics_instruments.get("latency_p95")
-        p99_gauge = _metrics_instruments.get("latency_p99")
+        # Update histogram metrics
+        p50_histogram = _metrics_instruments.get("latency_p50")
+        p95_histogram = _metrics_instruments.get("latency_p95")
+        p99_histogram = _metrics_instruments.get("latency_p99")
         
-        if p50_gauge:
-            p50_gauge.set(p50)
-        if p95_gauge:
-            p95_gauge.set(p95)
-        if p99_gauge:
-            p99_gauge.set(p99)
+        if p50_histogram:
+            p50_histogram.record(p50)
+        if p95_histogram:
+            p95_histogram.record(p95)
+        if p99_histogram:
+            p99_histogram.record(p99)
             
     except Exception as e:
         logger.debug(f"Failed to update latency percentiles: {e}")
@@ -766,13 +762,13 @@ def record_index_size(value: float, attributes: Optional[Dict[str, Any]] = None)
     
     try:
         if _metrics_initialized and _metrics_instruments:
-            index_gauge = _metrics_instruments.get("index_size")
-            if index_gauge:
+            index_histogram = _metrics_instruments.get("index_size")
+            if index_histogram:
                 labels = {}
                 if attributes:
                     for key, val in attributes.items():
                         labels[key] = str(val) if not isinstance(val, (str, int, float, bool)) else str(val)
-                index_gauge.set(value, attributes=labels)
+                index_histogram.record(value, attributes=labels)
     except Exception as e:
         logger.debug(f"Failed to record index size: {e}")
 
