@@ -10,6 +10,7 @@ import logging
 import json
 import time
 import uuid
+from contextlib import nullcontext
 from typing import Dict, Any, List, AsyncGenerator, Optional
 from datetime import datetime
 
@@ -23,6 +24,32 @@ from src.core.config import get_config
 from src.core.tracing import trace_span, record_metric, get_tracer
 
 logger = logging.getLogger(__name__)
+
+
+class _NullSpan:
+    """Mock span object that does nothing when tracing is unavailable."""
+    def set_attribute(self, key: str, value: Any) -> None:
+        """No-op method for compatibility when tracing is disabled."""
+        pass
+
+
+def _get_trace_context(name: str, attributes: Optional[Dict[str, Any]] = None):
+    """
+    Get trace context, falling back to nullcontext if tracing isn't initialized.
+    
+    Args:
+        name: Span name
+        attributes: Optional span attributes
+        
+    Returns:
+        Context manager that yields a span (real or mock)
+    """
+    try:
+        return trace_span(name, attributes)
+    except RuntimeError:
+        # Tracing not initialized, use nullcontext with mock span
+        logger.debug(f"Tracing not initialized, using nullcontext for span: {name}")
+        return nullcontext(_NullSpan())
 
 
 class ADKAgentWrapper:
@@ -148,7 +175,7 @@ class ADKAgentWrapper:
         start_time = time.time()
         resolved_model = model if model else "default"
         
-        with trace_span(
+        with _get_trace_context(
             "adk_wrapper.process_message",
             attributes={
                 "model": resolved_model,
@@ -267,7 +294,7 @@ class ADKAgentWrapper:
             runner: Runner instance to use for this request
         """
         events_list = []
-        with trace_span(
+        with _get_trace_context(
             "adk_wrapper._run_agent_async",
             attributes={
                 "user_id": user_id,
