@@ -145,7 +145,7 @@ timeout /t 3 /nobreak >nul
 
 REM Capture frontend PID by finding the pnpm/vite process
 REM Look for pnpm process running in frontend directory (most reliable)
-for /f "skip=1 tokens=2 delims=," %%a in ('wmic process where "CommandLine like '%%pnpm%%' and CommandLine like '%%frontend%%'" get ProcessId /format:csv 2^>nul') do (
+for /f "tokens=*" %%a in ('powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*pnpm*' -and $_.CommandLine -like '*frontend*' } | Select-Object -First 1 -ExpandProperty ProcessId" 2^>nul') do (
     if not "%%a"=="" (
         set FRONTEND_PID=%%a
         goto :frontend_pid_found
@@ -153,7 +153,7 @@ for /f "skip=1 tokens=2 delims=," %%a in ('wmic process where "CommandLine like 
 )
 
 REM Fallback: try to find vite process (pnpm spawns vite)
-for /f "skip=1 tokens=2 delims=," %%a in ('wmic process where "CommandLine like '%%vite%%'" get ProcessId /format:csv 2^>nul') do (
+for /f "tokens=*" %%a in ('powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*vite*' } | Select-Object -First 1 -ExpandProperty ProcessId" 2^>nul') do (
     if not "%%a"=="" (
         set FRONTEND_PID=%%a
         goto :frontend_pid_found
@@ -161,16 +161,16 @@ for /f "skip=1 tokens=2 delims=," %%a in ('wmic process where "CommandLine like 
 )
 
 REM Fallback: try to find any pnpm process
-for /f "skip=1 tokens=2 delims=," %%a in ('wmic process where "CommandLine like '%%pnpm%%'" get ProcessId /format:csv 2^>nul') do (
+for /f "tokens=*" %%a in ('powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*pnpm*' } | Select-Object -First 1 -ExpandProperty ProcessId" 2^>nul') do (
     if not "%%a"=="" (
         set FRONTEND_PID=%%a
         goto :frontend_pid_found
     )
 )
 
-REM Fallback: try to find by window title
-for /f "tokens=2" %%a in ('tasklist /FI "WindowTitle eq ADK-Frontend*" /FO CSV /NH 2^>nul') do (
-    set "FRONTEND_PID=%%~a"
+REM Fallback: try to find by window title using PowerShell
+for /f "tokens=*" %%a in ('powershell -Command "Get-Process | Where-Object { $_.MainWindowTitle -like 'ADK-Frontend*' } | Select-Object -First 1 -ExpandProperty Id" 2^>nul') do (
+    set "FRONTEND_PID=%%a"
     if not "!FRONTEND_PID!"=="" goto :frontend_pid_found
 )
 

@@ -7,6 +7,7 @@ threshold values.
 """
 
 import pytest
+import re
 from unittest.mock import Mock, patch
 from src.core.tools.rag_search import search_knowledge_base
 from src.retrieval.vector_store import SearchResult
@@ -124,7 +125,6 @@ class TestRAGSearchThreshold:
 
         assert f"Found {expected_doc_count} relevant documents" in result
         # Count document markers
-        import re
         doc_count = len(re.findall(r"--- Document \d+ ---", result))
         assert doc_count == expected_doc_count
         mock_vector_store.search.assert_called_once_with(

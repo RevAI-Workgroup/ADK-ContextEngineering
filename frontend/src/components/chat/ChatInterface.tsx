@@ -92,11 +92,19 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
         case 'token': {
           // Token streaming mode - accumulate response tokens
           if (tokenStreamingEnabled) {
-            setStreamingContent(prev => ({
-              reasoning: prev?.reasoning || '',
-              response: (prev?.response || '') + event.data.token,
-              messageId: prev?.messageId || (Date.now() + 1).toString()
-            }))
+            // Guard: early return if streamingContent is not initialized
+            // This ensures we reuse the messageId from handleSendMessage
+            setStreamingContent(prev => {
+              if (!prev) {
+                console.warn('Token event received before streamingContent initialization, ignoring')
+                return null
+              }
+              return {
+                reasoning: prev.reasoning,
+                response: prev.response + event.data.token,
+                messageId: prev.messageId
+              }
+            })
           }
           break
         }
@@ -104,11 +112,19 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
         case 'reasoning_token': {
           // Token streaming mode - accumulate reasoning tokens
           if (tokenStreamingEnabled) {
-            setStreamingContent(prev => ({
-              reasoning: (prev?.reasoning || '') + event.data.token,
-              response: prev?.response || '',
-              messageId: prev?.messageId || (Date.now() + 1).toString()
-            }))
+            // Guard: early return if streamingContent is not initialized
+            // This ensures we reuse the messageId from handleSendMessage
+            setStreamingContent(prev => {
+              if (!prev) {
+                console.warn('Reasoning token event received before streamingContent initialization, ignoring')
+                return null
+              }
+              return {
+                reasoning: prev.reasoning + event.data.token,
+                response: prev.response,
+                messageId: prev.messageId
+              }
+            })
           }
           break
         }
@@ -180,6 +196,13 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
               reasoning: finalReasoning ? finalReasoning : undefined,
               timestamp: event.timestamp,
               model: event.data?.model || selectedModel || undefined,
+              pipelineMetadata: event.data?.pipeline_metadata,
+              pipelineMetrics: event.data?.pipeline_metrics,
+              metrics: event.data?.enabled_techniques
+                ? {
+                    enabled_techniques: event.data.enabled_techniques,
+                  }
+                : undefined,
             }
             setMessages((prev) => [...prev, assistantMessage])
             setStreamingContent(null)
@@ -197,6 +220,13 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
                 : undefined,
               timestamp: event.timestamp,
               model: event.data?.model || selectedModel || undefined,
+              pipelineMetadata: event.data?.pipeline_metadata,
+              pipelineMetrics: event.data?.pipeline_metrics,
+              metrics: event.data?.enabled_techniques
+                ? {
+                    enabled_techniques: event.data.enabled_techniques,
+                  }
+                : undefined,
             }
             setMessages((prev) => [...prev, assistantMessage])
             streamingMessageRef.current = null

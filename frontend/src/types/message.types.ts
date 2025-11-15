@@ -29,10 +29,12 @@ export interface RAGMetadata {
 
 export interface PipelineMetrics {
   total_execution_time_ms?: number
-  modules?: Array<{
-    module_name: string
+  modules?: Record<string, {
     execution_time_ms: number
     technique_specific?: Record<string, any>
+    module_name?: string
+    input_tokens?: number
+    output_tokens?: number
   }>
 }
 
@@ -83,6 +85,9 @@ export interface CompleteEventData {
   model?: string
   reasoning_length?: number
   response_length?: number
+  pipeline_metrics?: PipelineMetrics
+  pipeline_metadata?: RAGMetadata
+  enabled_techniques?: string[]
 }
 
 export interface ErrorEventData {

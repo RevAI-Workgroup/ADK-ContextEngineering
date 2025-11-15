@@ -38,7 +38,7 @@ export function RAGFeedback({ metadata }: RAGFeedbackProps) {
   // Prioritize showing whichever one actually returned documents
   // If both have docs, prefer RAG-as-tool; if neither, show whichever has a status
   const displayRAGTool = hasRAGToolWithDocs || (hasRAGTool && !hasNaiveRAGWithDocs)
-  const displayNaiveRAG = hasNaiveRAGWithDocs || (hasNaiveRAG && !hasRAGToolWithDocs)
+  const displayNaiveRAG = !hasRAGToolWithDocs && (hasNaiveRAGWithDocs || hasNaiveRAG)
 
   // Destructure all fields
   const { rag_status, rag_retrieved_docs, rag_sources, rag_avg_similarity, rag_error, rag_message, rag_documents } = metadata

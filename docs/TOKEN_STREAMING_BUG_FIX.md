@@ -7,7 +7,7 @@ Users were experiencing "Connection lost. Please check your network and try agai
 ## Root Causes Identified
 
 ### 1. **Session Service Method Mismatch** (Primary Issue)
-**Location**: `src/api/adk_wrapper.py` line 708-730
+**Location**: `src/api/adk_wrapper.py` line 732-773
 
 The `process_message_stream_tokens()` method was calling a synchronous or non-existent method variant instead of the async method:
 - **Incorrect call**: `self.session_service.get_session_sync()` or a missing awaitable method that prevented proper async/await handling
@@ -161,7 +161,8 @@ useEffect(() => {
 ### 1. Restart Backend
 ```bash
 # Stop the current backend (Ctrl+C if running in terminal)
-# Then restart from the project root:
+# Navigate to project root if not already there (e.g., cd <YOUR_PROJECT_ROOT>)
+# Then restart the backend:
 source venv/bin/activate
 python -m uvicorn src.api.main:app --reload --port 8000 --log-level debug
 ```

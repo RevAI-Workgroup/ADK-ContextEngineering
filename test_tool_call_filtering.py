@@ -71,6 +71,7 @@ def test_tool_call_filtering():
     else:
         print(f"✗ Error: {response.status_code}")
         print(f"  {response.text}")
+        raise AssertionError(f"API request failed with status {response.status_code}")
 
     print("\n" + "=" * 60)
     print("Testing Complete")

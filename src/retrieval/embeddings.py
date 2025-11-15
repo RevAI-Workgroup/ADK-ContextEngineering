@@ -37,6 +37,8 @@ class EmbeddingService:
         """
         self.model_name = model_name
         self.cache_size = cache_size
+        self._lock = threading.Lock()
+        self._is_cleaned = False
 
         logger.info(f"Loading embedding model: {model_name}")
         try:
@@ -64,7 +66,16 @@ class EmbeddingService:
 
         Returns:
             Embedding vector as list of floats
+            
+        Raises:
+            RuntimeError: If the service has been cleaned up
         """
+        if self._is_cleaned:
+            raise RuntimeError(
+                f"EmbeddingService for model '{self.model_name}' has been cleaned up "
+                "and can no longer be used"
+            )
+        
         if not text or not text.strip():
             logger.warning("Empty text provided for embedding")
             return [0.0] * self.embedding_dim
@@ -106,7 +117,16 @@ class EmbeddingService:
 
         Returns:
             List of embedding vectors
+            
+        Raises:
+            RuntimeError: If the service has been cleaned up
         """
+        if self._is_cleaned:
+            raise RuntimeError(
+                f"EmbeddingService for model '{self.model_name}' has been cleaned up "
+                "and can no longer be used"
+            )
+        
         if not texts:
             return []
 
@@ -228,7 +248,16 @@ class EmbeddingService:
 
         Returns:
             Dictionary with model information
+            
+        Raises:
+            RuntimeError: If the service has been cleaned up
         """
+        if self._is_cleaned:
+            raise RuntimeError(
+                f"EmbeddingService for model '{self.model_name}' has been cleaned up "
+                "and can no longer be used"
+            )
+        
         return {
             "model_name": self.model_name,
             "embedding_dimension": self.embedding_dim,
@@ -242,16 +271,36 @@ class EmbeddingService:
         
         Releases the model and clears caches. Should be called when
         the service is being evicted from the cache.
+        
+        Thread-safe operation that atomically marks the service as cleaned
+        and releases resources. Subsequent calls to public methods will
+        raise RuntimeError instead of AttributeError.
         """
-        try:
-            # Clear embedding cache
-            self._embedding_cache.clear()
-            # Note: SentenceTransformer models don't have explicit cleanup,
-            # but clearing references helps with garbage collection
-            self.model = None
-            logger.info(f"Cleaned up EmbeddingService for model: {self.model_name}")
-        except Exception as e:
-            logger.warning(f"Error during EmbeddingService cleanup: {e}", exc_info=True)
+        with self._lock:
+            try:
+                # Log model name before nulling it
+                model_name_to_log = self.model_name
+                logger.info(
+                    f"Cleaning up EmbeddingService for model: {model_name_to_log}"
+                )
+                
+                # Set cleaned flag first (atomic under lock)
+                self._is_cleaned = True
+                
+                # Clear embedding cache
+                self._embedding_cache.clear()
+                
+                # Note: SentenceTransformer models don't have explicit cleanup,
+                # but clearing references helps with garbage collection
+                self.model = None
+                
+                logger.info(
+                    f"Successfully cleaned up EmbeddingService for model: {model_name_to_log}"
+                )
+            except Exception as e:
+                logger.warning(f"Error during EmbeddingService cleanup: {e}", exc_info=True)
+                # Ensure flag is set even if cleanup partially fails
+                self._is_cleaned = True
 
 
 # Multi-instance singleton pattern: one instance per model name

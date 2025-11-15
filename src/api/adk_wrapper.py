@@ -670,14 +670,19 @@ class ADKAgentWrapper:
             pipeline = None
             pipeline_context = None
             enriched_message = message
+            # Cache pipeline metrics and metadata for propagation to client
+            pipeline_metrics = None
+            pipeline_metadata = None
+            enabled_techniques = None
             
             if config:
                 logger.info(f"Initializing context engineering pipeline with config: {config.get_enabled_techniques()}")
                 pipeline = ContextPipeline(config)
+                enabled_techniques = config.get_enabled_techniques()
                 
                 yield {
                     "type": "thinking",
-                    "data": {"message": f"Running context engineering: {', '.join(config.get_enabled_techniques())}"}
+                    "data": {"message": f"Running context engineering: {', '.join(enabled_techniques)}"}
                 }
                 
                 # Process message through pipeline
@@ -685,6 +690,23 @@ class ADKAgentWrapper:
                     query=message,
                     conversation_history=[]
                 )
+                
+                # Get aggregated metrics after processing
+                pipeline_metrics = pipeline.get_aggregated_metrics()
+                pipeline_metadata = pipeline_context.metadata
+                
+                logger.info(
+                    f"Pipeline processed in {pipeline_metrics.get('total_execution_time_ms', 0):.2f}ms "
+                    f"with {len(pipeline_metrics.get('enabled_modules', []))} enabled modules"
+                )
+                
+                # Send early metadata event with pipeline information
+                yield {
+                    "type": "thinking",
+                    "data": {
+                        "message": f"Pipeline execution complete. Enabled modules: {', '.join(pipeline_metrics.get('enabled_modules', []))}"
+                    }
+                }
                 
                 # If pipeline modified the context, use the enriched version
                 if pipeline_context.context:
@@ -799,21 +821,23 @@ class ADKAgentWrapper:
                                         tokens_streamed_for_part = 0
 
                                         for segment_index, (segment_type, segment_text) in enumerate(segments):
-                                            words = segment_text.split()
-                                            if not words:
+                                            # Whitespace-preserving tokenization: iterate over runs of whitespace and non-whitespace
+                                            # This preserves all whitespace (spaces, newlines, tabs) unlike split() which collapses them
+                                            tokens = re.findall(r'\S+|\s+', segment_text)
+                                            if not tokens:
                                                 continue
 
                                             logger.debug(
-                                                "[Token Streaming] Segment %s type=%s word_count=%s",
+                                                "[Token Streaming] Segment %s type=%s token_count=%s",
                                                 segment_index + 1,
                                                 segment_type,
-                                                len(words)
+                                                len(tokens)
                                             )
 
-                                            for word_idx, word in enumerate(words):
-                                                token = word + " "
-
+                                            for token_idx, token in enumerate(tokens):
                                                 try:
+                                                    # Token is the matched substring (whitespace or non-whitespace run)
+                                                    # Append directly without manually adding spaces
                                                     if segment_type == "reasoning":
                                                         current_reasoning += token
                                                         yield {
@@ -834,10 +858,12 @@ class ADKAgentWrapper:
                                                         }
 
                                                     tokens_streamed_for_part += 1
-                                                    await asyncio.sleep(stream_delay_seconds)
+                                                    # Only delay on non-whitespace tokens to avoid delaying on pure whitespace
+                                                    if token.strip():
+                                                        await asyncio.sleep(stream_delay_seconds)
                                                 except Exception as token_yield_error:
                                                     logger.error(
-                                                        f"Error yielding token {word_idx}: {token_yield_error}",
+                                                        f"Error yielding token {token_idx}: {token_yield_error}",
                                                         exc_info=True
                                                     )
                                                     continue
@@ -946,18 +972,33 @@ class ADKAgentWrapper:
                     }
                 return
             
-            # Send completion signal with model info
+            # Send completion signal with model info and pipeline metrics/metadata
             logger.info(f"[Token Streaming] Sending completion signal (model: {resolved_model})")
             reasoning_length = len(current_reasoning.strip()) if current_reasoning.strip() else 0
             response_length = len(current_response.strip())
 
+            complete_data = {
+                "model": resolved_model,
+                "reasoning_length": reasoning_length if is_reasoning_model else 0,
+                "response_length": response_length
+            }
+            
+            # Include pipeline metrics, metadata, and enabled techniques if available
+            if pipeline_metrics is not None:
+                complete_data["pipeline_metrics"] = pipeline_metrics
+                logger.debug(f"Including pipeline metrics: {pipeline_metrics}")
+            
+            if pipeline_metadata is not None:
+                complete_data["pipeline_metadata"] = pipeline_metadata
+                logger.debug(f"Including pipeline metadata: {list(pipeline_metadata.keys())}")
+            
+            if enabled_techniques is not None:
+                complete_data["enabled_techniques"] = enabled_techniques
+                logger.debug(f"Including enabled techniques: {enabled_techniques}")
+
             yield {
                 "type": "complete",
-                "data": {
-                    "model": resolved_model,
-                    "reasoning_length": reasoning_length if is_reasoning_model else 0,
-                    "response_length": response_length
-                }
+                "data": complete_data
             }
             
         except Exception as e:

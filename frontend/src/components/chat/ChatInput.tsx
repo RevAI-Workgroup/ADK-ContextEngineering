@@ -42,6 +42,9 @@ export function ChatInput({
       const fileName = file.name.toLowerCase()
       if (!fileName.endsWith('.txt') && !fileName.endsWith('.md')) {
         alert('Please upload a .txt or .md file')
+        if (fileInputRef.current) {
+          fileInputRef.current.value = ''
+        }
         return
       }
       
@@ -49,6 +52,9 @@ export function ChatInput({
       const maxSize = 10 * 1024 * 1024
       if (file.size > maxSize) {
         alert('File size must be less than 10MB')
+        if (fileInputRef.current) {
+          fileInputRef.current.value = ''
+        }
         return
       }
       

@@ -53,6 +53,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
           const defaultConfig = createDefaultConfig()
           const { rag, ...rest } = parsed
           return {
+            ...defaultConfig,
             ...rest,
             naive_rag: rag,
             rag_tool: defaultConfig.rag_tool,
