@@ -160,8 +160,11 @@ class ADKAgentWrapper:
         Returns:
             True if the model is known to stream reasoning content, otherwise False.
         """
+        # Enable reasoning extraction for all models by default
+        # This ensures that if the model outputs <think> tags (which we now force via INSTRUCTION),
+        # they will be properly parsed and displayed in the frontend
         if not model:
-            return False
+            return True  # Default models use reasoning format
 
         model_lower = model.lower()
         reasoning_keywords = [
@@ -173,6 +176,11 @@ class ADKAgentWrapper:
             "gpt-o1",
             "reasoning",
             "think",
+            "qwen",   # Added: qwen models are instructed to use <think> tags
+            "llama",  # Added: llama models are instructed to use <think> tags
+            "mistral",
+            "phi",
+            "gemma",
         ]
         return any(keyword in model_lower for keyword in reasoning_keywords)
 
@@ -365,6 +373,7 @@ class ADKAgentWrapper:
         )
 
         # Build custom instruction based on configuration
+        # INSTRUCTION already includes the <think> tag requirement
         custom_instruction = INSTRUCTION
 
         # Add RAG capability to description and enhanced instructions if enabled
@@ -372,6 +381,7 @@ class ADKAgentWrapper:
             agent_description += ", and searching the knowledge base for information"
 
             # Enhance instructions with RAG-specific guidance
+            # Note: INSTRUCTION already contains the critical <think> tag formatting requirement
             custom_instruction = (
                 f"{INSTRUCTION}\n\n"
                 "⚠️ IMPORTANT - Knowledge Base Search:\n"
@@ -381,7 +391,8 @@ class ADKAgentWrapper:
                 "- Use it when users ask 'what', 'how', 'why', 'explain', or 'tell me about' anything\n"
                 "- Even for seemingly simple questions, the knowledge base might have relevant details\n"
                 "- If search returns no results, then you can say you don't have information\n\n"
-                "Strategy: When in doubt, search the knowledge base first!"
+                "Strategy: When in doubt, search the knowledge base first!\n\n"
+                "REMINDER: Always start your response with <think>reasoning</think> tags!"
             )
 
         agent_description += "."
@@ -392,6 +403,7 @@ class ADKAgentWrapper:
                 model=f"ollama_chat/{model}" if model else "ollama_chat/qwen3:4b",
                 temperature=temperature,
                 max_tokens=max_tokens,
+                stream=True,
             ),
             description=agent_description,
             instruction=custom_instruction,
@@ -767,9 +779,8 @@ class ADKAgentWrapper:
             current_reasoning = ""
             current_response = ""
             in_reasoning_phase = False
-            stream_delay_seconds = (
-                0.01  # 10ms delay to mimic incremental streaming cadence
-            )
+            # With stream=True in LiteLLM, we get real token-level streaming from Ollama
+            # No need for artificial delays
 
             # Ensure session exists before running agent
             # Use the same session creation logic as _run_agent_async
@@ -848,14 +859,16 @@ class ADKAgentWrapper:
                                     f"[Token Streaming] Event {event_count}, Part {part_idx}: {part_type}"
                                 )
 
-                                # Extract text and stream as tokens
+                                # Extract text and stream chunks as they arrive
+                                # With stream=True, LiteLLM emits text in real-time chunks from Ollama
                                 if hasattr(part, "text") and part.text:
                                     try:
                                         text = part.text
-                                        logger.info(
-                                            f"[Token Streaming] Streaming text: {text[:100]}... (length: {len(text)})"
+                                        logger.debug(
+                                            f"[Token Streaming] Received chunk: {text[:50]}... (length: {len(text)})"
                                         )
 
+                                        # Segment the text into reasoning and response parts
                                         segments, in_reasoning_phase = (
                                             self._segment_stream_text(
                                                 text=text,
@@ -866,79 +879,47 @@ class ADKAgentWrapper:
 
                                         if not segments:
                                             logger.debug(
-                                                "[Token Streaming] No streamable text segments detected"
+                                                "[Token Streaming] No segments detected, skipping"
                                             )
                                             continue
 
-                                        tokens_streamed_for_part = 0
-
-                                        for segment_index, (
-                                            segment_type,
-                                            segment_text,
-                                        ) in enumerate(segments):
-                                            # Whitespace-preserving tokenization: iterate over runs of whitespace and non-whitespace
-                                            # This preserves all whitespace (spaces, newlines, tabs) unlike split() which collapses them
-                                            tokens = re.findall(
-                                                r"\S+|\s+", segment_text
-                                            )
-                                            if not tokens:
+                                        # Stream each segment immediately without artificial delays
+                                        for segment_type, segment_text in segments:
+                                            if not segment_text:
                                                 continue
 
                                             logger.debug(
-                                                "[Token Streaming] Segment %s type=%s token_count=%s",
-                                                segment_index + 1,
-                                                segment_type,
-                                                len(tokens),
+                                                f"[Token Streaming] Streaming segment type={segment_type}, length={len(segment_text)}"
                                             )
 
-                                            for token_idx, token in enumerate(tokens):
-                                                try:
-                                                    # Token is the matched substring (whitespace or non-whitespace run)
-                                                    # Append directly without manually adding spaces
-                                                    if segment_type == "reasoning":
-                                                        current_reasoning += token
-                                                        yield {
-                                                            "type": "reasoning_token",
-                                                            "data": {
-                                                                "token": token,
-                                                                "cumulative_reasoning": current_reasoning,
-                                                            },
-                                                        }
-                                                    else:
-                                                        current_response += token
-                                                        yield {
-                                                            "type": "token",
-                                                            "data": {
-                                                                "token": token,
-                                                                "cumulative_response": current_response,
-                                                            },
-                                                        }
+                                            # Stream the chunk as-is (no artificial tokenization)
+                                            if segment_type == "reasoning":
+                                                current_reasoning += segment_text
+                                                yield {
+                                                    "type": "reasoning_token",
+                                                    "data": {
+                                                        "token": segment_text,
+                                                        "cumulative_reasoning": current_reasoning,
+                                                    },
+                                                }
+                                            else:
+                                                current_response += segment_text
+                                                yield {
+                                                    "type": "token",
+                                                    "data": {
+                                                        "token": segment_text,
+                                                        "cumulative_response": current_response,
+                                                    },
+                                                }
+                                            
+                                            # No artificial delays - stream naturally as chunks arrive
+                                            # Allow other async tasks to run with minimal yield
+                                            await asyncio.sleep(0)
 
-                                                    tokens_streamed_for_part += 1
-                                                    # Only delay on non-whitespace tokens to avoid delaying on pure whitespace
-                                                    if token.strip():
-                                                        await asyncio.sleep(
-                                                            stream_delay_seconds
-                                                        )
-                                                except Exception as token_yield_error:
-                                                    logger.error(
-                                                        f"Error yielding token {token_idx}: {token_yield_error}",
-                                                        exc_info=True,
-                                                    )
-                                                    continue
-
-                                        if tokens_streamed_for_part:
-                                            logger.info(
-                                                "[Token Streaming] Streamed %s tokens "
-                                                "(reasoning_chars=%s, response_chars=%s)",
-                                                tokens_streamed_for_part,
-                                                len(current_reasoning),
-                                                len(current_response),
-                                            )
-                                        else:
-                                            logger.debug(
-                                                "[Token Streaming] No tokens emitted for this part"
-                                            )
+                                        logger.debug(
+                                            f"[Token Streaming] Segment complete "
+                                            f"(reasoning_chars={len(current_reasoning)}, response_chars={len(current_response)})"
+                                        )
                                     except Exception as text_processing_error:
                                         logger.error(
                                             f"Error processing text part: {text_processing_error}",

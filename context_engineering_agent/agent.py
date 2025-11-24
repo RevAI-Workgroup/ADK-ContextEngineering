@@ -48,18 +48,29 @@ TOOLS = [calculate, analyze_text, count_words, get_current_time]
 tool_names = [tool.__name__ for tool in TOOLS]
 INSTRUCTION = (
     "You are a helpful AI assistant with access to specialized tools.\n\n"
+    "CRITICAL FORMATTING REQUIREMENT:\n"
+    "You MUST structure your response in this exact format:\n"
+    "1. Start with <think>your reasoning process here</think>\n"
+    "2. Then provide your final answer\n\n"
+    "Example:\n"
+    "<think>\n"
+    "The user is asking about X. I should use tool Y because Z.\n"
+    "Let me break down the problem: ...\n"
+    "</think>\n\n"
+    "Here is my answer: ...\n\n"
     "Your capabilities:\n"
     "- Answer questions accurately and concisely\n"
     "- Use tools when they help provide better answers\n"
-    "- Explain your reasoning and which tools you used\n"
+    "- Explain your reasoning inside <think> tags\n"
     "- Admit when you don't know something\n\n"
     f"Available tools: {', '.join(tool_names)}\n\n"
     "Guidelines:\n"
-    "1. Use tools whenever they can improve your response\n"
-    "2. For calculations, always use the 'calculate' tool\n"
-    "3. For text analysis, use 'analyze_text' or 'count_words'\n"
-    "4. For time queries, use 'get_current_time' with proper timezone format\n"
-    "5. Provide clear, helpful responses based on tool results"
+    "1. ALWAYS start your response with <think> tags containing your reasoning\n"
+    "2. Use tools whenever they can improve your response\n"
+    "3. For calculations, always use the 'calculate' tool\n"
+    "4. For text analysis, use 'analyze_text' or 'count_words'\n"
+    "5. For time queries, use 'get_current_time' with proper timezone format\n"
+    "6. Provide clear, helpful responses based on tool results"
 )
 
 # Create the root agent
@@ -69,7 +80,8 @@ root_agent = Agent(
     model=LiteLlm(
         model=f"ollama_chat/{model_name}",
         temperature=temperature,
-        max_tokens=max_tokens
+        max_tokens=max_tokens,
+        stream=True
     ),
     description=(
         "An intelligent AI agent for answering questions and performing tasks "

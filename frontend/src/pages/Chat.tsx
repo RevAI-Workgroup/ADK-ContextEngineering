@@ -217,7 +217,7 @@ export function Chat() {
             <Bot className="h-8 w-8 text-primary flex-shrink-0" />
             <h1 className="text-3xl font-bold whitespace-nowrap">Agent Chat</h1>
             <Badge variant="secondary" className="ml-2 flex-shrink-0">
-              Phase 2
+              Phase 3
             </Badge>
             <div className="ml-auto flex items-center gap-2 flex-shrink-0">
               {/* Token Streaming Toggle */}
