@@ -61,7 +61,19 @@ export interface ThinkingEventData {
 }
 
 export interface ToolCallEventData {
-  message: string
+  // New structured format
+  name?: string
+  description?: string
+  parameters?: Record<string, unknown> | unknown[]
+  timestamp?: string
+  // Legacy format for backward compatibility
+  message?: string
+}
+
+export interface ToolResultEventData {
+  name: string
+  result: unknown
+  timestamp?: string
 }
 
 export interface ResponseEventData {
@@ -88,6 +100,7 @@ export interface CompleteEventData {
   pipeline_metrics?: PipelineMetrics
   pipeline_metadata?: RAGMetadata
   enabled_techniques?: string[]
+  tool_calls?: ToolCall[]
 }
 
 export interface ErrorEventData {
@@ -107,6 +120,11 @@ export type StreamEvent =
   | {
       type: 'tool_call'
       data: ToolCallEventData
+      timestamp: string
+    }
+  | {
+      type: 'tool_result'
+      data: ToolResultEventData
       timestamp: string
     }
   | {

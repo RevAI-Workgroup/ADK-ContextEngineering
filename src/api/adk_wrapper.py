@@ -187,8 +187,8 @@ class ADKAgentWrapper:
         return any(keyword in model_lower for keyword in reasoning_keywords)
 
     def _segment_stream_text(
-        self, text: str, in_reasoning_phase: bool, is_reasoning_model: bool
-    ) -> Tuple[List[Tuple[str, str]], bool]:
+        self, text: str, in_reasoning_phase: bool, is_reasoning_model: bool, in_explicit_think_tag: bool = False
+    ) -> Tuple[List[Tuple[str, str]], bool, bool]:
         """
         Split streamed text into reasoning and response segments.
 
@@ -200,21 +200,23 @@ class ADKAgentWrapper:
             text: The raw text emitted by the model for this event.
             in_reasoning_phase: Whether the previous segment indicated we are inside a reasoning block.
             is_reasoning_model: Whether the current model is expected to emit reasoning traces.
+            in_explicit_think_tag: Whether we're inside an explicit <think> tag (vs implicit reasoning).
 
         Returns:
             A tuple containing:
                 - Ordered list of (segment_type, segment_text) tuples where segment_type is
                   either "reasoning" or "response".
                 - Updated in_reasoning_phase flag reflecting the end state after processing ``text``.
+                - Updated in_explicit_think_tag flag.
         """
         if not text:
-            return [], in_reasoning_phase
+            return [], in_reasoning_phase, in_explicit_think_tag
 
         # If the model is not reasoning-capable and we're not already in a reasoning block,
         # treat the entire segment as part of the final response.
         if not is_reasoning_model and not in_reasoning_phase:
             logger.debug(f"[Segment] Non-reasoning model, treating as response: {text[:50]}...")
-            return [("response", text)], in_reasoning_phase
+            return [("response", text)], in_reasoning_phase, in_explicit_think_tag
 
         remaining = text
         segments: List[Tuple[str, str]] = []
@@ -238,7 +240,7 @@ class ADKAgentWrapper:
             re.IGNORECASE,
         )
 
-        logger.debug(f"[Segment] Processing text (len={len(text)}, in_reasoning={in_reasoning_phase}): {text[:100]}...")
+        logger.debug(f"[Segment] Processing text (len={len(text)}, in_reasoning={in_reasoning_phase}, explicit_tag={in_explicit_think_tag}): {text[:100]}...")
 
         iteration_count = 0
         max_iterations = 100  # Safety guard
@@ -256,28 +258,31 @@ class ADKAgentWrapper:
                         segments.append(("reasoning", segment_text))
                     remaining = remaining[close_match.end() :]
                     in_reasoning_phase = False
+                    in_explicit_think_tag = False  # Exited explicit tag
                     logger.debug(f"[Segment] Closed reasoning block, remaining: {len(remaining)} chars")
                     continue
 
-                # Check for natural language answer markers that signal end of reasoning
-                answer_match = answer_pattern.search(remaining)
-                if answer_match:
-                    if answer_match.start() > 0:
-                        reasoning_part = remaining[: answer_match.start()]
-                        if reasoning_part.strip():
-                            logger.debug(f"[Segment] Reasoning before answer marker: {len(reasoning_part)} chars")
-                            segments.append(("reasoning", reasoning_part))
-                    remaining = remaining[answer_match.start() :]
-                    in_reasoning_phase = False
-                    logger.debug(f"[Segment] Found answer marker, exiting reasoning phase")
-                    continue
-                else:
-                    # No close tag or answer marker found, all remaining text is reasoning
-                    if remaining:
-                        logger.debug(f"[Segment] All remaining is reasoning: {len(remaining)} chars")
-                        segments.append(("reasoning", remaining))
-                    remaining = ""
-                    break
+                # ONLY check for answer markers if we're NOT inside explicit <think> tags
+                # This prevents truncation when model writes "Answer:" inside its thinking
+                if not in_explicit_think_tag:
+                    answer_match = answer_pattern.search(remaining)
+                    if answer_match:
+                        if answer_match.start() > 0:
+                            reasoning_part = remaining[: answer_match.start()]
+                            if reasoning_part.strip():
+                                logger.debug(f"[Segment] Reasoning before answer marker: {len(reasoning_part)} chars")
+                                segments.append(("reasoning", reasoning_part))
+                        remaining = remaining[answer_match.start() :]
+                        in_reasoning_phase = False
+                        logger.debug(f"[Segment] Found answer marker, exiting implicit reasoning phase")
+                        continue
+                
+                # No close tag found (or answer marker when in explicit tag), all remaining text is reasoning
+                if remaining:
+                    logger.debug(f"[Segment] All remaining is reasoning: {len(remaining)} chars")
+                    segments.append(("reasoning", remaining))
+                remaining = ""
+                break
             else:
                 # We're not in a reasoning block
 
@@ -312,10 +317,12 @@ class ADKAgentWrapper:
                         break
 
                     # No answer yet; treat the remainder as reasoning and keep phase active
-                    logger.debug(f"[Segment] Reasoning label with no answer marker, continuing as reasoning")
+                    # This is IMPLICIT reasoning (via label), not explicit <think> tag
+                    logger.debug(f"[Segment] Reasoning label with no answer marker, continuing as implicit reasoning")
                     segments.append(("reasoning", remaining))
                     remaining = ""
                     in_reasoning_phase = True
+                    in_explicit_think_tag = False  # Implicit reasoning
                     break
 
                 if open_match:
@@ -326,7 +333,8 @@ class ADKAgentWrapper:
                         segments.append(("response", before_text))
                     remaining = remaining[open_match.end() :]
                     in_reasoning_phase = True
-                    logger.debug(f"[Segment] Entered reasoning phase via <think> tag")
+                    in_explicit_think_tag = True  # EXPLICIT <think> tag
+                    logger.debug(f"[Segment] Entered reasoning phase via <think> tag (explicit)")
                     continue
 
                 # Fallback heuristics: many reasoning models emit "Answer:" style separators
@@ -357,8 +365,8 @@ class ADKAgentWrapper:
         if iteration_count >= max_iterations:
             logger.warning(f"[Segment] Max iterations reached, possible infinite loop. Remaining: {remaining[:100]}")
 
-        logger.debug(f"[Segment] Result: {len(segments)} segments, still_in_reasoning={in_reasoning_phase}")
-        return segments, in_reasoning_phase
+        logger.debug(f"[Segment] Result: {len(segments)} segments, still_in_reasoning={in_reasoning_phase}, explicit_tag={in_explicit_think_tag}")
+        return segments, in_reasoning_phase, in_explicit_think_tag
 
     def _get_or_create_runner(
         self,
@@ -569,6 +577,7 @@ class ADKAgentWrapper:
 
                 # Process events to extract response
                 response_text = ""
+                reasoning_text = ""  # For ADK 'thought' attribute
                 tool_calls = []
                 thinking_steps = []
 
@@ -576,19 +585,82 @@ class ADKAgentWrapper:
                     event_type = type(event).__name__
                     logger.debug(f"Processing event {idx}: {event_type}")
 
-                    # Extract text from content
+                    # Extract content from event
                     if hasattr(event, "content") and event.content:
                         if hasattr(event.content, "parts"):
                             for part in event.content.parts:
+                                # CRITICAL: Check for 'thought' attribute first
+                                # ADK/Gemini models store reasoning in part.thought, separate from part.text
+                                if hasattr(part, "thought") and part.thought:
+                                    thought_text = part.thought
+                                    logger.info(f"[Sync] Thought/reasoning detected ({len(thought_text)} chars): {thought_text[:100]}...")
+                                    reasoning_text += thought_text
+                                
+                                # Check for function call (tool usage)
+                                if hasattr(part, "function_call") and part.function_call:
+                                    func_call = part.function_call
+                                    tool_name = getattr(func_call, 'name', 'unknown_tool')
+                                    
+                                    # Extract function arguments if available
+                                    tool_args = {}
+                                    if hasattr(func_call, "args"):
+                                        try:
+                                            if isinstance(func_call.args, dict):
+                                                tool_args = func_call.args
+                                            elif isinstance(func_call.args, str):
+                                                import json
+                                                tool_args = json.loads(func_call.args)
+                                        except Exception as e:
+                                            logger.warning(f"Could not parse tool args: {e}")
+                                    
+                                    tool_call_data = {
+                                        "name": tool_name,
+                                        "description": f"Tool invocation: {tool_name}",
+                                        "parameters": tool_args if tool_args else None,
+                                        "timestamp": datetime.utcnow().isoformat(),
+                                    }
+                                    tool_calls.append(tool_call_data)
+                                    logger.info(f"[Sync] Tool call detected: {tool_name} with args: {tool_args}")
+                                
+                                # Check for function response (tool result)
+                                if hasattr(part, "function_response") and part.function_response:
+                                    func_response = part.function_response
+                                    response_name = getattr(func_response, 'name', 'unknown')
+                                    response_result = getattr(func_response, 'response', None)
+                                    if response_result is None:
+                                        response_result = getattr(func_response, 'result', str(func_response))
+                                    
+                                    # Update the corresponding tool call with the result
+                                    for tc in tool_calls:
+                                        if tc['name'] == response_name and tc.get('result') is None:
+                                            tc['result'] = response_result
+                                            logger.info(f"[Sync] Tool result added for: {response_name}")
+                                            break
+                                
+                                # Extract text content (accumulate rather than overwrite)
                                 if hasattr(part, "text") and part.text:
                                     text = part.text
                                     logger.info(
                                         f"Extracted text from event {idx}: {text[:100]}"
                                     )
-                                    response_text = text
+                                    # Check for embedded <think> tags in text
+                                    if "<think>" in text.lower() or "</think>" in text.lower():
+                                        # Extract reasoning from <think> tags
+                                        think_pattern = re.compile(r'<think>(.*?)</think>', re.DOTALL | re.IGNORECASE)
+                                        matches = think_pattern.findall(text)
+                                        for match in matches:
+                                            if match.strip():
+                                                reasoning_text += match.strip() + "\n"
+                                                logger.info(f"[Sync] Extracted embedded reasoning ({len(match)} chars)")
+                                        # Remove think tags from response text
+                                        clean_text = think_pattern.sub('', text).strip()
+                                        if clean_text:
+                                            response_text = clean_text
+                                    else:
+                                        response_text = text
 
-                    # Look for tool call information
-                    if "tool" in event_type.lower():
+                    # Legacy fallback: Look for tool call in event type name
+                    if "tool" in event_type.lower() and not any(tc for tc in tool_calls if tc.get('name') != event_type):
                         tool_calls.append(
                             {
                                 "name": event_type,
@@ -596,6 +668,11 @@ class ADKAgentWrapper:
                                 "timestamp": datetime.utcnow().isoformat(),
                             }
                         )
+                
+                # Convert reasoning to thinking_steps if we captured any
+                if reasoning_text.strip():
+                    thinking_steps = [reasoning_text.strip()]
+                    logger.info(f"[Sync] Total reasoning captured: {len(reasoning_text)} chars")
 
                 if response_text:
                     logger.info(f"Agent response received: {response_text[:200]}...")
@@ -825,6 +902,7 @@ class ADKAgentWrapper:
             current_reasoning = ""
             current_response = ""
             in_reasoning_phase = False
+            in_explicit_think_tag = False  # Track if we're inside explicit <think> tags
             # With stream=True in LiteLLM, we get real token-level streaming from Ollama
             # No need for artificial delays
 
@@ -1004,11 +1082,12 @@ class ADKAgentWrapper:
                                         # Only process if we have text
                                         if text_to_process:
                                             # Segment the text into reasoning and response parts
-                                            segments, in_reasoning_phase = (
+                                            segments, in_reasoning_phase, in_explicit_think_tag = (
                                                 self._segment_stream_text(
                                                     text=text_to_process,
                                                     in_reasoning_phase=in_reasoning_phase,
                                                     is_reasoning_model=is_reasoning_model,
+                                                    in_explicit_think_tag=in_explicit_think_tag,
                                                 )
                                             )
 
@@ -1086,13 +1165,66 @@ class ADKAgentWrapper:
                                             if hasattr(func_call, "name")
                                             else "unknown_tool"
                                         )
+                                        
+                                        # Extract function arguments if available
+                                        tool_args = {}
+                                        if hasattr(func_call, "args"):
+                                            try:
+                                                if isinstance(func_call.args, dict):
+                                                    tool_args = func_call.args
+                                                elif isinstance(func_call.args, str):
+                                                    import json
+                                                    tool_args = json.loads(func_call.args)
+                                            except Exception as e:
+                                                logger.warning(f"Could not parse tool args: {e}")
+                                        
+                                        tool_call_data = {
+                                            "name": tool_name,
+                                            "description": f"Tool invocation: {tool_name}",
+                                            "parameters": tool_args if tool_args else None,
+                                            "timestamp": datetime.utcnow().isoformat(),
+                                        }
+                                        tool_calls.append(tool_call_data)
+                                        
                                         logger.info(
-                                            f"[Token Streaming] Tool call detected: {tool_name}"
+                                            f"[Token Streaming] Tool call detected: {tool_name} with args: {tool_args}"
                                         )
+                                        # Emit full tool call data (not just message) for frontend display
                                         yield {
                                             "type": "tool_call",
                                             "data": {
-                                                "message": f"{tool_name}: Called tool"
+                                                "name": tool_name,
+                                                "description": f"Calling tool: {tool_name}",
+                                                "parameters": tool_args if tool_args else None,
+                                                "timestamp": datetime.utcnow().isoformat(),
+                                            },
+                                        }
+                                
+                                # Check for function response (tool result)
+                                if hasattr(part, "function_response"):
+                                    func_response = part.function_response
+                                    if func_response:
+                                        response_name = getattr(func_response, 'name', 'unknown')
+                                        response_result = getattr(func_response, 'response', None)
+                                        
+                                        # Try to extract result from response
+                                        if response_result is None:
+                                            # Try alternative attribute names
+                                            response_result = getattr(func_response, 'result', None)
+                                            if response_result is None:
+                                                response_result = str(func_response)
+                                        
+                                        logger.info(
+                                            f"[Token Streaming] Tool result received: {response_name} = {str(response_result)[:100]}..."
+                                        )
+                                        
+                                        # Emit tool result event for frontend to update tool call
+                                        yield {
+                                            "type": "tool_result",
+                                            "data": {
+                                                "name": response_name,
+                                                "result": response_result,
+                                                "timestamp": datetime.utcnow().isoformat(),
                                             },
                                         }
 
@@ -1101,11 +1233,12 @@ class ADKAgentWrapper:
                     logger.info(
                         f"[Token Streaming] Processing leftover buffer content ({len(stream_buffer)} chars): '{stream_buffer[:50]}...'"
                     )
-                    segments, in_reasoning_phase = (
+                    segments, in_reasoning_phase, in_explicit_think_tag = (
                         self._segment_stream_text(
                             text=stream_buffer,
                             in_reasoning_phase=in_reasoning_phase,
                             is_reasoning_model=is_reasoning_model,
+                            in_explicit_think_tag=in_explicit_think_tag,
                         )
                     )
                     
@@ -1287,6 +1420,7 @@ class ADKAgentWrapper:
         
         current_reasoning = ""
         current_response = ""
+        tool_calls = []  # Track tool calls during streaming
         
         try:
             # Build the full model name for LiteLLM
@@ -1390,14 +1524,21 @@ class ADKAgentWrapper:
             # Send completion
             # Note: This streaming mode prioritizes showing reasoning over tool execution
             # For tool functionality, use Token Streaming = OFF which uses ADK's run_async
+            complete_data = {
+                "model": resolved_model,
+                "reasoning_length": reasoning_length,
+                "response_length": response_length,
+                "pipeline_metrics": pipeline_metrics,
+            }
+            
+            # Include tool calls if any were detected
+            if tool_calls:
+                complete_data["tool_calls"] = tool_calls
+                logger.info(f"[Token Streaming] Including {len(tool_calls)} tool call(s) in complete event")
+            
             yield {
                 "type": "complete",
-                "data": {
-                    "model": resolved_model,
-                    "reasoning_length": reasoning_length,
-                    "response_length": response_length,
-                    "pipeline_metrics": pipeline_metrics,
-                },
+                "data": complete_data,
             }
             
         except Exception as e:
@@ -1539,24 +1680,60 @@ class ADKAgentWrapper:
                 # Yield event info
                 event_type = type(event).__name__
 
-                if "tool" in event_type.lower():
-                    tool_call_data = {
-                        "name": event_type,
-                        "description": f"Tool invocation: {event_type}",
-                        "timestamp": datetime.utcnow().isoformat(),
-                    }
-                    tool_calls.append(tool_call_data)
-                    yield {
-                        "type": "tool_call",
-                        "data": {
-                            "message": f"{event_type}: Tool invocation: {event_type}"
-                        },
-                    }
-
-                # Extract text from content
+                # Extract content from event
                 if hasattr(event, "content") and event.content:
                     if hasattr(event.content, "parts"):
                         for part in event.content.parts:
+                            # Check for function call (tool usage)
+                            if hasattr(part, "function_call") and part.function_call:
+                                func_call = part.function_call
+                                tool_name = getattr(func_call, 'name', 'unknown_tool')
+                                
+                                # Extract function arguments if available
+                                tool_args = {}
+                                if hasattr(func_call, "args"):
+                                    try:
+                                        if isinstance(func_call.args, dict):
+                                            tool_args = func_call.args
+                                        elif isinstance(func_call.args, str):
+                                            import json
+                                            tool_args = json.loads(func_call.args)
+                                    except Exception as e:
+                                        logger.warning(f"Could not parse tool args: {e}")
+                                
+                                tool_call_data = {
+                                    "name": tool_name,
+                                    "description": f"Calling tool: {tool_name}",
+                                    "parameters": tool_args if tool_args else None,
+                                    "timestamp": datetime.utcnow().isoformat(),
+                                }
+                                tool_calls.append(tool_call_data)
+                                
+                                logger.info(f"[Standard Streaming] Tool call: {tool_name} with args: {tool_args}")
+                                yield {
+                                    "type": "tool_call",
+                                    "data": tool_call_data,
+                                }
+                            
+                            # Check for function response (tool result)
+                            if hasattr(part, "function_response") and part.function_response:
+                                func_response = part.function_response
+                                response_name = getattr(func_response, 'name', 'unknown')
+                                response_result = getattr(func_response, 'response', None)
+                                if response_result is None:
+                                    response_result = getattr(func_response, 'result', str(func_response))
+                                
+                                logger.info(f"[Standard Streaming] Tool result: {response_name} = {str(response_result)[:100]}...")
+                                yield {
+                                    "type": "tool_result",
+                                    "data": {
+                                        "name": response_name,
+                                        "result": response_result,
+                                        "timestamp": datetime.utcnow().isoformat(),
+                                    },
+                                }
+                            
+                            # Extract text content
                             if hasattr(part, "text") and part.text:
                                 response_text = part.text
 

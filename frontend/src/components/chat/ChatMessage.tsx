@@ -30,7 +30,25 @@ export function ChatMessage({ message, isStreaming = false }: ChatMessageProps) 
 
       {/* Message Content */}
       <div className={cn('flex-1 space-y-2', isUser ? 'items-end' : 'items-start')}>
-        {/* Main Message */}
+        {/* RAG Feedback - Show retrieval information only when RAG retrieved documents */}
+        {!isUser && message.pipelineMetadata?.rag_status === 'success' && message.pipelineMetadata?.rag_retrieved_docs > 0 && (
+          <RAGFeedback metadata={message.pipelineMetadata} />
+        )}
+
+        {/* Collapsible Reasoning - Show for reasoning models with token streaming (appears before main message) */}
+        {!isUser && (message.reasoning || (isStreaming && message.reasoning !== undefined)) && (
+          <CollapsibleReasoning 
+            reasoning={message.reasoning || ''} 
+            isStreaming={isStreaming}
+          />
+        )}
+
+        {/* Tool Calls - Show after reasoning, before main message */}
+        {!isUser && message.toolCalls && message.toolCalls.length > 0 && (
+          <ToolOutputDisplay toolCalls={message.toolCalls} />
+        )}
+
+        {/* Main Message - LLM answer (appears after reasoning and tool calls) */}
         <Card className={cn(isUser ? 'bg-primary text-primary-foreground' : '')}>
           <CardContent className="p-3">
             <p className="text-sm whitespace-pre-wrap">{message.content}</p>
@@ -58,25 +76,7 @@ export function ChatMessage({ message, isStreaming = false }: ChatMessageProps) 
           </CardContent>
         </Card>
 
-        {/* RAG Feedback - Show retrieval information only when RAG retrieved documents */}
-        {!isUser && message.pipelineMetadata?.rag_status === 'success' && message.pipelineMetadata?.rag_retrieved_docs > 0 && (
-          <RAGFeedback metadata={message.pipelineMetadata} />
-        )}
-
-        {/* Collapsible Reasoning - Show for reasoning models with token streaming */}
-        {!isUser && (message.reasoning || (isStreaming && message.reasoning !== undefined)) && (
-          <CollapsibleReasoning 
-            reasoning={message.reasoning || ''} 
-            isStreaming={isStreaming}
-          />
-        )}
-
-        {/* Tool Calls */}
-        {!isUser && message.toolCalls && message.toolCalls.length > 0 && (
-          <ToolOutputDisplay toolCalls={message.toolCalls} />
-        )}
-
-        {/* Thinking Steps (standard mode) */}
+        {/* Thinking Steps (standard mode) - Show after main message */}
         {!isUser && message.thinking && message.thinking.length > 0 && (
           <ThinkingDisplay steps={message.thinking} />
         )}

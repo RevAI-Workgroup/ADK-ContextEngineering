@@ -39,6 +39,7 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
     reasoning: string
     response: string
     messageId: string
+    toolCalls: ToolCall[]
   } | null>(null)
 
   // Track last processed event to avoid re-processing on every update
@@ -160,7 +161,8 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
               return {
                 reasoning: prev.reasoning,
                 response: prev.response + tokenText,
-                messageId: prev.messageId
+                messageId: prev.messageId,
+                toolCalls: prev.toolCalls || []
               }
             })
           }
@@ -185,7 +187,8 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
               return {
                 reasoning: newReasoning,
                 response: prev.response,
-                messageId: prev.messageId
+                messageId: prev.messageId,
+                toolCalls: prev.toolCalls || []
               }
             })
           }
@@ -202,13 +205,24 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
 
         case 'tool_call': {
           // TypeScript now knows event.data is ToolCallEventData
-          if (streamingMessageRef.current) {
-            // Parse tool call message to extract structured data
+          // Handle both new structured format and legacy message format
+          let toolCall: ToolCall
+          
+          if (event.data.name) {
+            // New structured format with name, description, parameters
+            toolCall = {
+              name: event.data.name,
+              description: event.data.description || `Calling tool: ${event.data.name}`,
+              parameters: event.data.parameters,
+              timestamp: event.data.timestamp || event.timestamp
+            }
+          } else if (event.data.message) {
+            // Legacy format: parse tool call message to extract structured data
             // Expected format: "tool_name: description" or just description
             const message = event.data.message
             const colonIndex = message.indexOf(':')
             
-            const toolCall: ToolCall = colonIndex > 0 
+            toolCall = colonIndex > 0 
               ? {
                   name: message.substring(0, colonIndex).trim(),
                   description: message.substring(colonIndex + 1).trim(),
@@ -219,8 +233,70 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
                   description: message,
                   timestamp: event.timestamp
                 }
-            
+          } else {
+            // Fallback
+            toolCall = {
+              name: 'unknown',
+              description: 'Tool call detected',
+              timestamp: event.timestamp
+            }
+          }
+          
+          console.log('[ChatInterface] 🔧 Tool call event received:', toolCall.name, toolCall)
+          
+          // Track tool calls in standard mode
+          if (streamingMessageRef.current) {
             streamingMessageRef.current.toolCalls.push(toolCall)
+            console.log('[ChatInterface] Tool call added to standard mode, total:', streamingMessageRef.current.toolCalls.length)
+          }
+          
+          // Track tool calls in token streaming mode
+          if (tokenStreamingEnabled) {
+            setStreamingContent(prev => {
+              if (!prev) {
+                console.warn('[ChatInterface] Tool call event received before streamingContent initialization, ignoring')
+                return null
+              }
+              const updated = {
+                ...prev,
+                toolCalls: [...prev.toolCalls, toolCall]
+              }
+              console.log('[ChatInterface] Tool call added to token streaming mode, total:', updated.toolCalls.length)
+              return updated
+            })
+          }
+          break
+        }
+        
+        case 'tool_result': {
+          // Handle tool result event - update existing tool call with result
+          const resultData = event.data
+          console.log('[ChatInterface] 🔧 Tool result event received:', resultData.name, resultData.result)
+          
+          // Update tool call with result in standard mode
+          if (streamingMessageRef.current) {
+            const toolIndex = streamingMessageRef.current.toolCalls.findIndex(
+              tc => tc.name === resultData.name && !tc.result
+            )
+            if (toolIndex >= 0) {
+              streamingMessageRef.current.toolCalls[toolIndex].result = resultData.result
+              console.log('[ChatInterface] Tool result added to standard mode for:', resultData.name)
+            }
+          }
+          
+          // Update tool call with result in token streaming mode
+          if (tokenStreamingEnabled) {
+            setStreamingContent(prev => {
+              if (!prev) return null
+              const updatedToolCalls = prev.toolCalls.map(tc => {
+                if (tc.name === resultData.name && !tc.result) {
+                  return { ...tc, result: resultData.result }
+                }
+                return tc
+              })
+              console.log('[ChatInterface] Tool result added to token streaming mode for:', resultData.name)
+              return { ...prev, toolCalls: updatedToolCalls }
+            })
           }
           break
         }
@@ -274,11 +350,24 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
               responsePreview: finalResponse.slice(0, 100)
             })
             
+            // Merge tool calls from streaming content and complete event
+            const toolCallsFromStream = streamingContent.toolCalls || []
+            const toolCallsFromComplete = event.data?.tool_calls || []
+            const allToolCalls = [...toolCallsFromStream, ...toolCallsFromComplete]
+            
+            console.log('[ChatInterface] 📊 Finalizing message with tool calls:', {
+              fromStream: toolCallsFromStream.length,
+              fromComplete: toolCallsFromComplete.length,
+              total: allToolCalls.length,
+              toolCalls: allToolCalls
+            })
+            
             const assistantMessage: Message = {
               id: streamingContent.messageId,
               role: 'assistant',
               content: finalResponse,
               reasoning: finalReasoning ? finalReasoning : undefined,
+              toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
               timestamp: event.timestamp,
               model: event.data?.model || selectedModel || undefined,
               pipelineMetadata: event.data?.pipeline_metadata,
@@ -403,6 +492,7 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
             reasoning: '',
             response: '',
             messageId: (Date.now() + 1).toString(),
+            toolCalls: [],
           })
         } else {
           // Standard mode - initialize the streaming message container
@@ -431,11 +521,18 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
         // Use HTTP for synchronous request
         const response = await sendHttpMessage(content, undefined, true, selectedModel, config)
 
+        // Convert thinking_steps array to reasoning string for CollapsibleReasoning component
+        // thinking_steps is an array of thinking step strings from the backend
+        const reasoningString = response.thinking_steps && response.thinking_steps.length > 0
+          ? response.thinking_steps.join('\n')
+          : undefined
+
         const assistantMessage: Message = {
           id: Date.now().toString(),
           role: 'assistant',
           content: response.response,
           thinking: response.thinking_steps,
+          reasoning: reasoningString,  // Also include as reasoning for CollapsibleReasoning
           toolCalls: response.tool_calls,
           timestamp: response.timestamp,
           model: response.model,
@@ -570,6 +667,9 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
                     role: 'assistant',
                     content: streamingContent.response,
                     reasoning: streamingContent.reasoning,
+                    toolCalls: streamingContent.toolCalls && streamingContent.toolCalls.length > 0 
+                      ? streamingContent.toolCalls 
+                      : undefined,
                     timestamp: new Date().toISOString()
                   }}
                   isStreaming={true}

@@ -105,11 +105,14 @@ export function Chat() {
     messages.forEach(message => {
       if (message.toolCalls && message.toolCalls.length > 0) {
         message.toolCalls.forEach(toolCall => {
-          toolsUsed.add(toolCall.name)
+          const toolName = toolCall.name.toLowerCase().trim()
+          toolsUsed.add(toolName)
+          console.log('[Chat] Tool used:', toolName, 'from message:', message.id)
         })
       }
     })
 
+    console.log('[Chat] Active tools:', Array.from(toolsUsed))
     setActiveTools(toolsUsed)
     
     // Auto-expand if any tools are being used
@@ -330,14 +333,18 @@ export function Chat() {
               <CardContent className="pt-0">
                 <div className="flex flex-wrap gap-2">
                   {availableTools.length > 0 ? (
-                    availableTools.map((tool) => (
-                      <ToolBadge 
-                        key={tool.name} 
-                        name={tool.name} 
-                        description={tool.description}
-                        isActive={activeTools.has(tool.name)}
-                      />
-                    ))
+                    availableTools.map((tool) => {
+                      const toolNameLower = tool.name.toLowerCase().trim()
+                      const isActive = activeTools.has(toolNameLower)
+                      return (
+                        <ToolBadge 
+                          key={tool.name} 
+                          name={tool.name} 
+                          description={tool.description}
+                          isActive={isActive}
+                        />
+                      )
+                    })
                   ) : (
                     <p className="text-sm text-muted-foreground">No tools available</p>
                   )}

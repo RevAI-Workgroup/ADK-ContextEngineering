@@ -254,18 +254,26 @@ async def chat_websocket(websocket: WebSocket):
         while True:
             start_time = time.time()
             # Receive message from client
-            data = await websocket.receive_text()
+            try:
+                data = await websocket.receive_text()
+            except WebSocketDisconnect:
+                logger.info("WebSocket disconnected while waiting for message")
+                break
             
             # Parse JSON with error handling
             try:
                 message_data = json.loads(data)
             except json.JSONDecodeError as e:
                 logger.error(f"JSON decode error: {e}. Raw data: {data[:200]}")
-                await websocket.send_json({
-                    "type": "error",
-                    "data": {"error": f"Invalid JSON: {str(e)}"},
-                    "timestamp": datetime.now(timezone.utc).isoformat()
-                })
+                try:
+                    await websocket.send_json({
+                        "type": "error",
+                        "data": {"error": f"Invalid JSON: {str(e)}"},
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    })
+                except WebSocketDisconnect:
+                    logger.info("WebSocket disconnected while sending JSON error")
+                    break
                 continue
             
             logger.debug(
@@ -274,11 +282,15 @@ async def chat_websocket(websocket: WebSocket):
             )
             # Validate message
             if message_data.get("type") != "message":
-                await websocket.send_json({
-                    "type": "error",
-                    "data": {"error": "Invalid message type"},
-                    "timestamp": datetime.now(timezone.utc).isoformat()
-                })
+                try:
+                    await websocket.send_json({
+                        "type": "error",
+                        "data": {"error": "Invalid message type"},
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    })
+                except WebSocketDisconnect:
+                    logger.info("WebSocket disconnected while sending validation error")
+                    break
                 continue
             
             # Extract model and streaming preference from message data
@@ -309,15 +321,19 @@ async def chat_websocket(websocket: WebSocket):
                             message_data.get("config"),
                             exc_info=True
                         )
-                        await websocket.send_json({
-                            "type": "error",
-                            "data": {
-                                "error": "invalid_configuration",
-                                "message": error_msg,
-                                "details": str(config_error)
-                            },
-                            "timestamp": datetime.now(timezone.utc).isoformat()
-                        })
+                        try:
+                            await websocket.send_json({
+                                "type": "error",
+                                "data": {
+                                    "error": "invalid_configuration",
+                                    "message": error_msg,
+                                    "details": str(config_error)
+                                },
+                                "timestamp": datetime.now(timezone.utc).isoformat()
+                            })
+                        except WebSocketDisconnect:
+                            logger.info("WebSocket disconnected while sending config parsing error")
+                            break
                         continue
                     
                     # Validate configuration
@@ -330,15 +346,19 @@ async def chat_websocket(websocket: WebSocket):
                             message_data.get("config"),
                             exc_info=True
                         )
-                        await websocket.send_json({
-                            "type": "error",
-                            "data": {
-                                "error": "invalid_configuration",
-                                "message": error_msg,
-                                "details": str(validation_errors)
-                            },
-                            "timestamp": datetime.now(timezone.utc).isoformat()
-                        })
+                        try:
+                            await websocket.send_json({
+                                "type": "error",
+                                "data": {
+                                    "error": "invalid_configuration",
+                                    "message": error_msg,
+                                    "details": str(validation_errors)
+                                },
+                                "timestamp": datetime.now(timezone.utc).isoformat()
+                            })
+                        except WebSocketDisconnect:
+                            logger.info("WebSocket disconnected while sending config validation error")
+                            break
                         continue
                 
                 # Process message with streaming (choose method based on token streaming preference)
@@ -360,6 +380,10 @@ async def chat_websocket(websocket: WebSocket):
                                     "data": event["data"],
                                     "timestamp": datetime.now(timezone.utc).isoformat()
                                 })
+                            except WebSocketDisconnect as disconnect_error:
+                                logger.info(f"WebSocket disconnected during streaming: {disconnect_error}")
+                                # Exit the outer loop when client disconnects
+                                raise
                             except Exception as send_error:
                                 logger.error(f"Error sending event to WebSocket: {send_error}", exc_info=True)
                                 # If we can't send, break the loop
@@ -381,6 +405,10 @@ async def chat_websocket(websocket: WebSocket):
                                     "data": event["data"],
                                     "timestamp": datetime.now(timezone.utc).isoformat()
                                 })
+                            except WebSocketDisconnect as disconnect_error:
+                                logger.info(f"WebSocket disconnected during streaming: {disconnect_error}")
+                                # Exit the outer loop when client disconnects
+                                raise
                             except Exception as send_error:
                                 logger.error(f"Error sending event to WebSocket: {send_error}", exc_info=True)
                                 # If we can't send, break the loop
@@ -397,6 +425,9 @@ async def chat_websocket(websocket: WebSocket):
                     # Send completion signal (if not already sent by streaming method)
                     # Note: The streaming methods now send their own complete signals
                     logger.debug("WebSocket message processing complete")
+                except WebSocketDisconnect:
+                    # Client disconnected during streaming - let it bubble up to outer handler
+                    raise
                 except Exception as stream_error:
                     logger.error(f"Error in streaming loop: {stream_error}", exc_info=True)
                     # Try to send error to client before re-raising
