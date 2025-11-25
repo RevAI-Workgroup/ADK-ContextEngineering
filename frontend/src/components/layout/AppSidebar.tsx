@@ -1,4 +1,4 @@
-import { Brain, MessageSquare, BarChart3, Home, Database } from 'lucide-react'
+import { MessageSquare, BarChart3, Home, Database } from 'lucide-react'
 import { Link, useLocation } from 'react-router-dom'
 import {
   Sidebar,
@@ -36,7 +36,11 @@ export function AppSidebar() {
     <Sidebar>
       <SidebarHeader className="border-b px-6 py-4">
         <div className="flex items-center gap-2">
-          <Brain className="h-6 w-6 text-primary" />
+          <img 
+            src="/logo.png" 
+            alt="Context Engineering Logo" 
+            className="h-10 w-10 object-contain"
+          />
           <div className="flex flex-col">
             <span className="text-lg font-bold">Context Engineering</span>
             <span className="text-xs text-muted-foreground">Phase 3</span>

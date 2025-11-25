@@ -174,56 +174,51 @@ export function Chat() {
   return (
     <div className="flex gap-6 p-6">
       {/* Left Sidebar - Configuration & Run History */}
-      <div className="w-80 space-y-4">
-        <Button
-          ref={configButtonRef}
-          variant={showConfigPanel ? 'default' : 'outline'}
-          className="w-full"
-          onClick={() => setShowConfigPanel(!showConfigPanel)}
-        >
-          {showConfigPanel ? 'Hide' : 'Show'} Configuration
-        </Button>
-        
-        {showConfigPanel && (
-          <div 
-            ref={configPanelRef}
-            className="max-h-[calc(100vh-250px)] overflow-y-auto overflow-x-hidden"
+      <div className="w-80 flex flex-col" style={{ paddingTop: '8.8rem' }}>
+        <div className="space-y-4">
+          <Button
+            ref={configButtonRef}
+            variant={showConfigPanel ? 'default' : 'outline'}
+            className="w-full"
+            onClick={() => setShowConfigPanel(!showConfigPanel)}
           >
-            <ConfigurationPanel
-              config={config}
-              onConfigChange={setConfig}
+            {showConfigPanel ? 'Hide' : 'Show'} Configuration
+          </Button>
+          
+          {showConfigPanel && (
+            <div 
+              ref={configPanelRef}
+              className="max-h-[calc(100vh-250px)] overflow-y-auto overflow-x-hidden"
+            >
+              <ConfigurationPanel
+                config={config}
+                onConfigChange={setConfig}
+              />
+            </div>
+          )}
+          
+          <Button
+            variant={showRunHistory ? 'default' : 'outline'}
+            className="w-full"
+            onClick={() => setShowRunHistory(!showRunHistory)}
+          >
+            {showRunHistory ? 'Hide' : 'Show'} Run History
+          </Button>
+          
+          {showRunHistory && (
+            <RunHistory
+              onCompareRuns={handleCompareRuns}
+              onRerunWithConfig={handleRerunWithConfig}
             />
-          </div>
-        )}
-        
-        <Button
-          variant={showRunHistory ? 'default' : 'outline'}
-          className="w-full"
-          onClick={() => setShowRunHistory(!showRunHistory)}
-        >
-          {showRunHistory ? 'Hide' : 'Show'} Run History
-        </Button>
-        
-        {showRunHistory && (
-          <RunHistory
-            onCompareRuns={handleCompareRuns}
-            onRerunWithConfig={handleRerunWithConfig}
-          />
-        )}
+          )}
+        </div>
       </div>
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col space-y-6">
-        {/* Page Header */}
+        {/* Controls */}
         <div className="w-full">
           <div className="flex items-center justify-center gap-16 mb-2">
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <Bot className="h-8 w-8 text-primary flex-shrink-0" />
-              <h1 className="text-3xl font-bold whitespace-nowrap">Agent Chat</h1>
-              <Badge variant="secondary" className="flex-shrink-0">
-                Phase 3
-              </Badge>
-            </div>
             <div className="flex items-center gap-2 flex-shrink-0">
               {/* Token Streaming Toggle */}
               <div className="flex items-center gap-2 border rounded-lg px-3 py-2 bg-background hover:bg-accent/50 transition-colors">

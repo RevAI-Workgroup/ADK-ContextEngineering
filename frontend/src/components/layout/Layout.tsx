@@ -1,12 +1,16 @@
-import { Outlet } from 'react-router-dom'
+import { Outlet, useLocation } from 'react-router-dom'
 import { AppSidebar } from './AppSidebar'
 import { ErrorBoundary } from '../common/ErrorBoundary'
 import { SidebarProvider, SidebarTrigger, SidebarInset, useSidebar } from '@/components/ui/sidebar'
 import { useEffect } from 'react'
+import { Bot } from 'lucide-react'
+import { Badge } from '../ui/badge'
 
 function LayoutContent() {
   const { setOpen, isMobile, open } = useSidebar()
+  const location = useLocation()
   const SIDEBAR_WIDTH = 256 // 16rem in pixels
+  const isChatPage = location.pathname === '/chat'
 
   useEffect(() => {
     if (isMobile) return // Don't enable hover behavior on mobile
@@ -36,6 +40,17 @@ function LayoutContent() {
       <SidebarInset className="flex flex-1 flex-col">
         <header className="sticky top-0 z-10 flex h-14 items-center gap-4 border-b bg-background/95 px-6 backdrop-blur supports-[backdrop-filter]:bg-background/60">
           <SidebarTrigger />
+          {isChatPage && (
+            <div className="flex-1 flex items-center justify-center ml-80">
+              <div className="flex items-center gap-2">
+                <Bot className="h-6 w-6 text-primary flex-shrink-0" />
+                <h1 className="text-xl font-bold whitespace-nowrap">Agent Chat</h1>
+                <Badge variant="secondary" className="flex-shrink-0">
+                  Phase 3
+                </Badge>
+              </div>
+            </div>
+          )}
         </header>
         <ErrorBoundary>
           <main className="flex-1 p-6">
