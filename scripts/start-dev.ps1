@@ -70,6 +70,34 @@ if (-not (Test-Path "venv\Scripts\Activate.ps1")) {
     Cleanup
 }
 
+function Test-BackendHealth {
+    param(
+        [int]$MaxAttempts = 30,
+        [int]$IntervalSeconds = 1
+    )
+    
+    $attempts = 0
+    while ($attempts -lt $MaxAttempts) {
+        try {
+            $response = Invoke-WebRequest -Uri "http://localhost:8000/health" -TimeoutSec 1 -ErrorAction Stop
+            if ($response.StatusCode -eq 200) {
+                Write-Log "BACKEND" "Health check passed - backend is ready!" "Green"
+                return $true
+            }
+        } catch {
+            # Backend not ready yet, continue polling
+        }
+        
+        $attempts++
+        if ($attempts -lt $MaxAttempts) {
+            Start-Sleep -Seconds $IntervalSeconds
+        }
+    }
+    
+    Write-Log "BACKEND" "Health check failed - backend did not become ready in time" "Yellow"
+    return $false
+}
+
 try {
     # Start backend
     Write-Log "BACKEND" "Starting FastAPI server..." "Blue"
@@ -80,10 +108,17 @@ try {
         & uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000
     }
 
-    # Give backend a moment to start
-    Start-Sleep -Seconds 2
+    # Wait for backend to be ready via health check
+    Write-Log "BACKEND" "Waiting for backend to be ready..." "Cyan"
+    Start-Sleep -Seconds 2  # Give backend a moment to start
+    $backendReady = Test-BackendHealth
+    
+    if (-not $backendReady) {
+        Write-Log "BACKEND" "Proceeding with frontend startup despite health check timeout" "Yellow"
+    }
 
-    # Start frontend
+    # Start frontend only after backend is ready
+    Write-Log "SYSTEM" "Backend is ready, starting frontend..." "Cyan"
     Write-Log "FRONTEND" "Starting Vite dev server..." "Green"
     $FrontendJob = Start-Job -ScriptBlock {
         Set-Location "$using:PSScriptRoot\frontend"

@@ -70,7 +70,9 @@ INSTRUCTION = (
     "3. For calculations, always use the 'calculate' tool\n"
     "4. For text analysis, use 'analyze_text' or 'count_words'\n"
     "5. For time queries, use 'get_current_time' with proper timezone format\n"
-    "6. Provide clear, helpful responses based on tool results"
+    "6. Provide clear, helpful responses based on tool results\n"
+    "7. IMPORTANT: When using get_current_time, always use the 'time' field (human-readable format) "
+    "in your response to the user. Never use the 'iso_format' field as it is not user-friendly."
 )
 
 # Create the root agent

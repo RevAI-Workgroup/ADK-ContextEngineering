@@ -7,6 +7,7 @@
  */
 
 const { spawn } = require('child_process');
+const http = require('http');
 const path = require('path');
 const os = require('os');
 
@@ -31,13 +32,65 @@ function log(prefix, message, color = colors.reset) {
   console.log(`${color}${colors.bright}[${prefix}]${colors.reset} ${message}`);
 }
 
+/**
+ * Check if backend is ready by polling the /health endpoint
+ * @param {number} maxAttempts - Maximum number of attempts
+ * @param {number} intervalMs - Interval between attempts in milliseconds
+ * @returns {Promise<boolean>} - True if backend is ready
+ */
+function checkBackendHealth(maxAttempts = 30, intervalMs = 1000) {
+  return new Promise((resolve) => {
+    let attempts = 0;
+    
+    const checkHealth = () => {
+      attempts++;
+      
+      const req = http.get('http://localhost:8000/health', (res) => {
+        if (res.statusCode === 200) {
+          log('BACKEND', 'Health check passed - backend is ready!', colors.green);
+          resolve(true);
+        } else {
+          if (attempts < maxAttempts) {
+            setTimeout(checkHealth, intervalMs);
+          } else {
+            log('BACKEND', 'Health check failed - backend did not become ready in time', colors.yellow);
+            resolve(false);
+          }
+        }
+      });
+      
+      req.on('error', () => {
+        if (attempts < maxAttempts) {
+          // Backend not ready yet, try again
+          setTimeout(checkHealth, intervalMs);
+        } else {
+          log('BACKEND', 'Health check failed - backend did not become ready in time', colors.yellow);
+          resolve(false);
+        }
+      });
+      
+      req.setTimeout(500, () => {
+        req.destroy();
+        if (attempts < maxAttempts) {
+          setTimeout(checkHealth, intervalMs);
+        } else {
+          log('BACKEND', 'Health check failed - backend did not become ready in time', colors.yellow);
+          resolve(false);
+        }
+      });
+    };
+    
+    // Start checking after a short delay to give backend time to start
+    setTimeout(checkHealth, 2000);
+  });
+}
+
 function startBackend() {
   return new Promise((resolve, reject) => {
     log('BACKEND', 'Starting FastAPI server...', colors.blue);
 
     let backendProcess;
     let settled = false;
-    let startupTimer;
     
     if (isWindows) {
       // Windows: Use cmd to run activation and uvicorn
@@ -78,7 +131,6 @@ function startBackend() {
     backendProcess.on('error', (error) => {
       if (!settled) {
         settled = true;
-        clearTimeout(startupTimer);
         log('BACKEND', `Error: ${error.message}`, colors.red);
         reject(error);
       }
@@ -89,19 +141,26 @@ function startBackend() {
         log('BACKEND', `Exited with code ${code}`, colors.red);
         if (!settled) {
           settled = true;
-          clearTimeout(startupTimer);
           reject(new Error(`Backend process exited with code ${code}`));
         }
       }
     });
 
-    // Give backend a moment to start
-    startupTimer = setTimeout(() => {
+    // Wait for backend to be ready via health check
+    log('BACKEND', 'Waiting for backend to be ready...', colors.cyan);
+    checkBackendHealth().then((isReady) => {
       if (!settled) {
         settled = true;
-        resolve(backendProcess);
+        if (isReady) {
+          resolve(backendProcess);
+        } else {
+          // Backend started but health check failed - still resolve to allow frontend to start
+          // The user can manually reload if needed
+          log('BACKEND', 'Proceeding with frontend startup despite health check timeout', colors.yellow);
+          resolve(backendProcess);
+        }
       }
-    }, 1000);
+    });
   });
 }
 
@@ -281,8 +340,12 @@ async function main() {
       log('WARNING', `Error: ${error.message}`, colors.yellow);
     }
 
-    // Start both servers
+    // Start backend first and wait for it to be ready
+    log('SYSTEM', 'Starting backend server...', colors.cyan);
     await startBackend();
+    
+    // Only start frontend after backend is ready
+    log('SYSTEM', 'Backend is ready, starting frontend...', colors.cyan);
     await startFrontend();
 
     console.log(`\n${colors.cyan}${colors.bright}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${colors.reset}`);

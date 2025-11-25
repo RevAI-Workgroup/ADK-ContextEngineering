@@ -26,11 +26,14 @@ def get_current_time(city: str) -> Dict[str, Any]:
             - city: the input `city`
             - time: formatted local time as "YYYY-MM-DD HH:MM:SS TZ±HHMM" (e.g., "2025-10-27 15:30:45 JST+0900")
             - timezone: string representation of the resolved timezone (e.g., "Asia/Tokyo")
-            - iso_format: ISO 8601 representation of the current time
+            - iso_format: ISO 8601 representation of the current time (for programmatic use only)
           On error, a dictionary with:
             - status: "error"
             - city: the input `city`
             - error_message: a human-readable explanation of the failure (may suggest valid timezone identifiers)
+    
+    IMPORTANT: When responding to users, always use the "time" field value as it is human-readable.
+    Do NOT use the "iso_format" field when answering users - it is intended for programmatic use only.
     """
     try:
         # Try to create timezone - this will raise an exception if invalid

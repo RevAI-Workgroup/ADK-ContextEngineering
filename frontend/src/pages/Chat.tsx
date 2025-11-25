@@ -4,15 +4,14 @@ import { ConfigurationPanel } from '../components/chat/ConfigurationPanel'
 import { RunHistory } from '../components/chat/RunHistory'
 import { RunComparison } from '../components/chat/RunComparison'
 import { Card, CardContent, CardHeader } from '../components/ui/card'
-import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
 import { Switch } from '../components/ui/switch'
 import { Label } from '../components/ui/label'
-import { Bot, Trash2, XCircle, ChevronDown, ChevronUp, Zap } from 'lucide-react'
+import { Trash2, XCircle, ChevronDown, ChevronUp, Zap } from 'lucide-react'
 import { useChatContext } from '../contexts/ChatContext'
 import { modelsService } from '../services/modelsService'
 import { agentService } from '../services/agentService'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { Alert, AlertDescription } from '../components/ui/alert'
 import { ContextEngineeringConfig } from '../types/config.types'
 import { cn } from '../lib/utils'
@@ -30,8 +29,6 @@ export function Chat() {
   const [showComparison, setShowComparison] = useState(false)
   const [availableTools, setAvailableTools] = useState<Tool[]>([])
   const [activeTools, setActiveTools] = useState<Set<string>>(new Set())
-  const configPanelRef = useRef<HTMLDivElement>(null)
-  const configButtonRef = useRef<HTMLButtonElement>(null)
 
   // Fetch available tools when config changes
   useEffect(() => {
@@ -76,26 +73,6 @@ export function Chat() {
       return () => clearTimeout(timer)
     }
   }, [rerunMessage])
-
-  // Handle click outside configuration panel
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (
-        showConfigPanel &&
-        configPanelRef.current &&
-        configButtonRef.current &&
-        !configPanelRef.current.contains(event.target as Node) &&
-        !configButtonRef.current.contains(event.target as Node)
-      ) {
-        setShowConfigPanel(false)
-      }
-    }
-
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside)
-    }
-  }, [showConfigPanel])
 
   // Track active tools from messages and auto-expand
   useEffect(() => {
@@ -177,7 +154,6 @@ export function Chat() {
       <div className="w-80 flex flex-col" style={{ paddingTop: '8.8rem' }}>
         <div className="space-y-4">
           <Button
-            ref={configButtonRef}
             variant={showConfigPanel ? 'default' : 'outline'}
             className="w-full"
             onClick={() => setShowConfigPanel(!showConfigPanel)}
@@ -186,10 +162,7 @@ export function Chat() {
           </Button>
           
           {showConfigPanel && (
-            <div 
-              ref={configPanelRef}
-              className="max-h-[calc(100vh-250px)] overflow-y-auto overflow-x-hidden"
-            >
+            <div className="max-h-[calc(100vh-250px)] overflow-y-auto overflow-x-hidden">
               <ConfigurationPanel
                 config={config}
                 onConfigChange={setConfig}
@@ -335,7 +308,6 @@ export function Chat() {
                         <ToolBadge 
                           key={tool.name} 
                           name={tool.name} 
-                          description={tool.description}
                           isActive={isActive}
                         />
                       )
@@ -370,10 +342,9 @@ export function Chat() {
 interface ToolBadgeProps {
   name: string
   isActive?: boolean
-  description?: string
 }
 
-function ToolBadge({ name, isActive = false, description }: ToolBadgeProps) {
+function ToolBadge({ name, isActive = false }: ToolBadgeProps) {
   return (
     <div 
       className={`px-2 py-1 rounded-md transition-colors duration-300 ${
