@@ -344,9 +344,10 @@ async def chat_websocket(websocket: WebSocket):
                 # Process message with streaming (choose method based on token streaming preference)
                 try:
                     if enable_token_streaming:
-                        logger.info("Using token-level streaming mode")
-                        # Token streaming mode - yields individual tokens
-                        async for event in adk_wrapper.process_message_stream_tokens(
+                        logger.info("Using LiteLLM direct streaming mode (accesses reasoning_content)")
+                        # Use LiteLLM direct streaming to get reasoning_content
+                        # This bypasses ADK's abstraction to access model thinking
+                        async for event in adk_wrapper.process_message_stream_litellm(
                             message=message_data["message"],
                             session_id=message_data.get("session_id"),
                             model=selected_model,

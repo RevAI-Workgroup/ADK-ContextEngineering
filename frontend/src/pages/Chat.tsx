@@ -213,13 +213,15 @@ export function Chat() {
       <div className="flex-1 flex flex-col space-y-6">
         {/* Page Header */}
         <div className="w-full">
-          <div className="flex items-center gap-2 mb-2">
-            <Bot className="h-8 w-8 text-primary flex-shrink-0" />
-            <h1 className="text-3xl font-bold whitespace-nowrap">Agent Chat</h1>
-            <Badge variant="secondary" className="ml-2 flex-shrink-0">
-              Phase 3
-            </Badge>
-            <div className="ml-auto flex items-center gap-2 flex-shrink-0">
+          <div className="flex items-center justify-center gap-16 mb-2">
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <Bot className="h-8 w-8 text-primary flex-shrink-0" />
+              <h1 className="text-3xl font-bold whitespace-nowrap">Agent Chat</h1>
+              <Badge variant="secondary" className="flex-shrink-0">
+                Phase 3
+              </Badge>
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
               {/* Token Streaming Toggle */}
               <div className="flex items-center gap-2 border rounded-lg px-3 py-2 bg-background hover:bg-accent/50 transition-colors">
                 <Zap className={cn(
@@ -347,7 +349,7 @@ export function Chat() {
 
         {/* Chat Interface */}
         <div className="flex flex-col items-center w-full">
-          <div className="w-full max-w-4xl">
+          <div className="w-full">
             <ChatInterface useRealtime={tokenStreamingEnabled} />
           </div>
         </div>

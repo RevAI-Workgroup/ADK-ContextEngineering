@@ -21,6 +21,8 @@ from google.adk import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
 from src.core.config import get_config
+# Direct LiteLLM import for accessing reasoning_content that ADK doesn't expose
+import litellm
 from src.core.tracing import trace_span, record_metric, get_tracer
 from src.core.context_config import ContextEngineeringConfig
 from src.core.modular_pipeline import ContextPipeline
@@ -190,6 +192,10 @@ class ADKAgentWrapper:
         """
         Split streamed text into reasoning and response segments.
 
+        This method detects and separates reasoning content (inside <think> tags or similar markers)
+        from final response content. It handles both explicit XML-style tags and natural language
+        markers like "Answer:" or "Final Response:".
+
         Args:
             text: The raw text emitted by the model for this event.
             in_reasoning_phase: Whether the previous segment indicated we are inside a reasoning block.
@@ -207,55 +213,82 @@ class ADKAgentWrapper:
         # If the model is not reasoning-capable and we're not already in a reasoning block,
         # treat the entire segment as part of the final response.
         if not is_reasoning_model and not in_reasoning_phase:
+            logger.debug(f"[Segment] Non-reasoning model, treating as response: {text[:50]}...")
             return [("response", text)], in_reasoning_phase
 
         remaining = text
         segments: List[Tuple[str, str]] = []
 
+        # Patterns for detecting reasoning blocks
+        # Supports: <think>, <thinking>, <analysis>, <reasoning>, <thought>
         open_pattern = re.compile(
             r"<\s*(think|thinking|analysis|reasoning|thought)\s*>", re.IGNORECASE
         )
         close_pattern = re.compile(
             r"<\s*/\s*(think|thinking|analysis|reasoning|thought)\s*>", re.IGNORECASE
         )
+        # Pattern to detect the start of a final answer
         answer_pattern = re.compile(
-            r"(?:^|\n+)\s*(final answer|answer|final response|response|solution)\s*:?",
+            r"(?:^|\n+)\s*(final answer|answer|final response|response|solution|conclusion)\s*:?",
             re.IGNORECASE,
         )
+        # Pattern for explicit reasoning labels at the start
         reasoning_label_pattern = re.compile(
-            r"^\s*(analysis|reasoning|thought|thinking|chain of thought|deliberation)\s*:?",
+            r"^\s*(analysis|reasoning|thought|thinking|chain of thought|deliberation|let me think|i need to)\s*:?",
             re.IGNORECASE,
         )
 
-        while remaining:
+        logger.debug(f"[Segment] Processing text (len={len(text)}, in_reasoning={in_reasoning_phase}): {text[:100]}...")
+
+        iteration_count = 0
+        max_iterations = 100  # Safety guard
+
+        while remaining and iteration_count < max_iterations:
+            iteration_count += 1
+
             if in_reasoning_phase:
+                # We're inside a reasoning block, look for the closing tag
                 close_match = close_pattern.search(remaining)
                 if close_match:
                     segment_text = remaining[: close_match.start()]
                     if segment_text:
+                        logger.debug(f"[Segment] Found reasoning content before close tag: {len(segment_text)} chars")
                         segments.append(("reasoning", segment_text))
                     remaining = remaining[close_match.end() :]
                     in_reasoning_phase = False
+                    logger.debug(f"[Segment] Closed reasoning block, remaining: {len(remaining)} chars")
                     continue
 
+                # Check for natural language answer markers that signal end of reasoning
                 answer_match = answer_pattern.search(remaining)
                 if answer_match:
                     if answer_match.start() > 0:
                         reasoning_part = remaining[: answer_match.start()]
                         if reasoning_part.strip():
+                            logger.debug(f"[Segment] Reasoning before answer marker: {len(reasoning_part)} chars")
                             segments.append(("reasoning", reasoning_part))
                     remaining = remaining[answer_match.start() :]
                     in_reasoning_phase = False
+                    logger.debug(f"[Segment] Found answer marker, exiting reasoning phase")
                     continue
                 else:
+                    # No close tag or answer marker found, all remaining text is reasoning
                     if remaining:
+                        logger.debug(f"[Segment] All remaining is reasoning: {len(remaining)} chars")
                         segments.append(("reasoning", remaining))
                     remaining = ""
                     break
             else:
-                # Handle explicit reasoning labels (e.g., "Reasoning:", "Analysis:")
+                # We're not in a reasoning block
+
+                # Check for explicit opening reasoning tag
+                open_match = open_pattern.search(remaining)
+                
+                # Check for reasoning label at the start (e.g., "Reasoning:", "Let me think")
                 reasoning_label_match = reasoning_label_pattern.match(remaining)
+                
                 if reasoning_label_match:
+                    # Handle explicit reasoning labels
                     answer_match = answer_pattern.search(
                         remaining, reasoning_label_match.end()
                     )
@@ -268,50 +301,63 @@ class ADKAgentWrapper:
                         response_part = remaining[split_index:]
 
                         if reasoning_part.strip():
+                            logger.debug(f"[Segment] Reasoning label block: {len(reasoning_part)} chars")
                             segments.append(("reasoning", reasoning_part))
 
                         if response_part:
+                            logger.debug(f"[Segment] Response after label block: {len(response_part)} chars")
                             segments.append(("response", response_part))
 
                         remaining = ""
                         break
 
                     # No answer yet; treat the remainder as reasoning and keep phase active
+                    logger.debug(f"[Segment] Reasoning label with no answer marker, continuing as reasoning")
                     segments.append(("reasoning", remaining))
                     remaining = ""
                     in_reasoning_phase = True
                     break
 
-                open_match = open_pattern.search(remaining)
                 if open_match:
+                    # Found an opening reasoning tag
                     before_text = remaining[: open_match.start()]
                     if before_text:
+                        logger.debug(f"[Segment] Response before think tag: {len(before_text)} chars")
                         segments.append(("response", before_text))
                     remaining = remaining[open_match.end() :]
                     in_reasoning_phase = True
+                    logger.debug(f"[Segment] Entered reasoning phase via <think> tag")
                     continue
 
-                # Fallback heuristics: many reasoning models emit "Answer:" style separators.
+                # Fallback heuristics: many reasoning models emit "Answer:" style separators
                 answer_match = answer_pattern.search(remaining)
                 if answer_match and answer_match.start() > 0:
+                    # Text before "Answer:" might be implicit reasoning
                     reasoning_part = remaining[: answer_match.start()]
                     response_part = remaining[answer_match.start() :]
 
                     if reasoning_part.strip():
+                        logger.debug(f"[Segment] Implicit reasoning before answer: {len(reasoning_part)} chars")
                         segments.append(("reasoning", reasoning_part))
 
                     if response_part:
+                        logger.debug(f"[Segment] Response after answer marker: {len(response_part)} chars")
                         segments.append(("response", response_part))
 
                     remaining = ""
                     break
 
-                # No reasoning markers detected — treat the remainder as response text.
+                # No reasoning markers detected — treat the remainder as response text
                 if remaining:
+                    logger.debug(f"[Segment] No markers, treating as response: {len(remaining)} chars")
                     segments.append(("response", remaining))
                 remaining = ""
                 break
 
+        if iteration_count >= max_iterations:
+            logger.warning(f"[Segment] Max iterations reached, possible infinite loop. Remaining: {remaining[:100]}")
+
+        logger.debug(f"[Segment] Result: {len(segments)} segments, still_in_reasoning={in_reasoning_phase}")
         return segments, in_reasoning_phase
 
     def _get_or_create_runner(
@@ -837,6 +883,9 @@ class ADKAgentWrapper:
             last_event_time = asyncio.get_event_loop().time()
             EVENT_TIMEOUT = 120.0  # 120 seconds max between events
 
+            # Initialize Smart Buffer for tag fragmentation prevention
+            stream_buffer = ""
+
             try:
                 agent_stream = runner.run_async(
                     user_id=user_id, session_id=session_id, new_message=content
@@ -855,71 +904,164 @@ class ADKAgentWrapper:
                         if hasattr(event.content, "parts"):
                             for part_idx, part in enumerate(event.content.parts):
                                 part_type = type(part).__name__
-                                logger.debug(
-                                    f"[Token Streaming] Event {event_count}, Part {part_idx}: {part_type}"
+                                
+                                # Log all relevant Part attributes for debugging
+                                part_text = getattr(part, 'text', None)
+                                part_thought = getattr(part, 'thought', None)
+                                part_func_call = getattr(part, 'function_call', None)
+                                part_func_response = getattr(part, 'function_response', None)
+                                
+                                logger.info(
+                                    f"[Token Streaming] Event {event_count}, Part {part_idx}: "
+                                    f"text={repr(part_text[:50] if part_text else None)}, "
+                                    f"thought={repr(part_thought[:50] if part_thought else None) if part_thought else None}, "
+                                    f"func_call={bool(part_func_call)}, func_response={bool(part_func_response)}"
                                 )
+
+                                # CRITICAL: Check for 'thought' attribute first
+                                # ADK/Gemini models store reasoning in part.thought, separate from part.text
+                                # This is how models like Qwen3 expose their internal thinking process
+                                if hasattr(part, "thought") and part.thought:
+                                    try:
+                                        thought_text = part.thought
+                                        logger.info(
+                                            f"[Token Streaming] 🧠 THOUGHT detected (length={len(thought_text)}): "
+                                            f"{repr(thought_text[:100])}{'...' if len(thought_text) > 100 else ''}"
+                                        )
+                                        
+                                        # Stream thought content directly as reasoning
+                                        current_reasoning += thought_text
+                                        yield {
+                                            "type": "reasoning_token",
+                                            "data": {
+                                                "token": thought_text,
+                                                "cumulative_reasoning": current_reasoning,
+                                            },
+                                        }
+                                        logger.info(
+                                            f"[Token Streaming] Cumulative reasoning (from thought) now {len(current_reasoning)} chars"
+                                        )
+                                        await asyncio.sleep(0)
+                                    except Exception as thought_error:
+                                        logger.error(
+                                            f"Error processing thought part: {thought_error}",
+                                            exc_info=True,
+                                        )
 
                                 # Extract text and stream chunks as they arrive
                                 # With stream=True, LiteLLM emits text in real-time chunks from Ollama
                                 if hasattr(part, "text") and part.text:
                                     try:
                                         text = part.text
-                                        logger.debug(
-                                            f"[Token Streaming] Received chunk: {text[:50]}... (length: {len(text)})"
+                                        logger.info(
+                                            f"[Token Streaming] Received chunk (length={len(text)}): "
+                                            f"{repr(text[:100])}{'...' if len(text) > 100 else ''}"
                                         )
 
-                                        # Segment the text into reasoning and response parts
-                                        segments, in_reasoning_phase = (
-                                            self._segment_stream_text(
-                                                text=text,
-                                                in_reasoning_phase=in_reasoning_phase,
-                                                is_reasoning_model=is_reasoning_model,
-                                            )
-                                        )
+                                        # Append to stream buffer
+                                        stream_buffer += text
 
-                                        if not segments:
-                                            logger.debug(
-                                                "[Token Streaming] No segments detected, skipping"
+                                        # Check if buffer ends with a partial tag
+                                        # Patterns to detect incomplete tags:
+                                        # - '<' at end (start of any tag)
+                                        # - '</' at end (start of closing tag)
+                                        # - '<think' or '</think' without '>' (incomplete tag)
+                                        # - Any '<' followed by characters but no '>' at the end
+                                        partial_tag_patterns = [
+                                            r'<\s*$',  # Just '<' or '< ' at end
+                                            r'<\s*/\s*$',  # Just '</' at end
+                                            r'<\s*[a-zA-Z][^>]{0,30}$',  # Opening tag started but not closed
+                                            r'<\s*/\s*[a-zA-Z][^>]{0,30}$',  # Closing tag started but not closed
+                                        ]
+                                        
+                                        partial_tag_match = None
+                                        for pattern in partial_tag_patterns:
+                                            match = re.search(pattern, stream_buffer)
+                                            if match:
+                                                partial_tag_match = match
+                                                break
+                                        
+                                        text_to_process = ""
+                                        if partial_tag_match:
+                                            # Split: safe part before the partial tag, and the partial tag itself
+                                            partial_start = partial_tag_match.start()
+                                            safe_to_process = stream_buffer[:partial_start]
+                                            partial_tag = stream_buffer[partial_start:]
+                                            
+                                            logger.info(
+                                                f"[Token Streaming] Partial tag detected: {repr(partial_tag)} "
+                                                f"(holding back {len(partial_tag)} chars, safe={len(safe_to_process)} chars)"
                                             )
-                                            continue
+                                            
+                                            text_to_process = safe_to_process
+                                            stream_buffer = partial_tag  # Keep partial tag for next iteration
+                                        else:
+                                            # No partial tag - process everything
+                                            text_to_process = stream_buffer
+                                            stream_buffer = ""  # Clear buffer
+                                            logger.debug(f"[Token Streaming] No partial tag, processing all {len(text_to_process)} chars")
+                                        
+                                        # Only process if we have text
+                                        if text_to_process:
+                                            # Segment the text into reasoning and response parts
+                                            segments, in_reasoning_phase = (
+                                                self._segment_stream_text(
+                                                    text=text_to_process,
+                                                    in_reasoning_phase=in_reasoning_phase,
+                                                    is_reasoning_model=is_reasoning_model,
+                                                )
+                                            )
 
-                                        # Stream each segment immediately without artificial delays
-                                        for segment_type, segment_text in segments:
-                                            if not segment_text:
+                                            if not segments:
+                                                logger.debug(
+                                                    "[Token Streaming] No segments detected, skipping"
+                                                )
                                                 continue
 
+                                            # Stream each segment immediately without artificial delays
+                                            for segment_type, segment_text in segments:
+                                                if not segment_text:
+                                                    continue
+
+                                                logger.info(
+                                                    f"[Token Streaming] YIELDING {segment_type.upper()} segment "
+                                                    f"(len={len(segment_text)}): {repr(segment_text[:80])}{'...' if len(segment_text) > 80 else ''}"
+                                                )
+
+                                                # Stream the chunk as-is (no artificial tokenization)
+                                                if segment_type == "reasoning":
+                                                    current_reasoning += segment_text
+                                                    yield {
+                                                        "type": "reasoning_token",
+                                                        "data": {
+                                                            "token": segment_text,
+                                                            "cumulative_reasoning": current_reasoning,
+                                                        },
+                                                    }
+                                                    logger.debug(
+                                                        f"[Token Streaming] Cumulative reasoning now {len(current_reasoning)} chars"
+                                                    )
+                                                else:
+                                                    current_response += segment_text
+                                                    yield {
+                                                        "type": "token",
+                                                        "data": {
+                                                            "token": segment_text,
+                                                            "cumulative_response": current_response,
+                                                        },
+                                                    }
+                                                    logger.debug(
+                                                        f"[Token Streaming] Cumulative response now {len(current_response)} chars"
+                                                    )
+                                                
+                                                # No artificial delays - stream naturally as chunks arrive
+                                                # Allow other async tasks to run with minimal yield
+                                                await asyncio.sleep(0)
+
                                             logger.debug(
-                                                f"[Token Streaming] Streaming segment type={segment_type}, length={len(segment_text)}"
+                                                f"[Token Streaming] Segment complete "
+                                                f"(reasoning_chars={len(current_reasoning)}, response_chars={len(current_response)})"
                                             )
-
-                                            # Stream the chunk as-is (no artificial tokenization)
-                                            if segment_type == "reasoning":
-                                                current_reasoning += segment_text
-                                                yield {
-                                                    "type": "reasoning_token",
-                                                    "data": {
-                                                        "token": segment_text,
-                                                        "cumulative_reasoning": current_reasoning,
-                                                    },
-                                                }
-                                            else:
-                                                current_response += segment_text
-                                                yield {
-                                                    "type": "token",
-                                                    "data": {
-                                                        "token": segment_text,
-                                                        "cumulative_response": current_response,
-                                                    },
-                                                }
-                                            
-                                            # No artificial delays - stream naturally as chunks arrive
-                                            # Allow other async tasks to run with minimal yield
-                                            await asyncio.sleep(0)
-
-                                        logger.debug(
-                                            f"[Token Streaming] Segment complete "
-                                            f"(reasoning_chars={len(current_reasoning)}, response_chars={len(current_response)})"
-                                        )
                                     except Exception as text_processing_error:
                                         logger.error(
                                             f"Error processing text part: {text_processing_error}",
@@ -953,6 +1095,44 @@ class ADKAgentWrapper:
                                                 "message": f"{tool_name}: Called tool"
                                             },
                                         }
+
+                # After loop: Process any remaining buffer content
+                if stream_buffer.strip():
+                    logger.info(
+                        f"[Token Streaming] Processing leftover buffer content ({len(stream_buffer)} chars): '{stream_buffer[:50]}...'"
+                    )
+                    segments, in_reasoning_phase = (
+                        self._segment_stream_text(
+                            text=stream_buffer,
+                            in_reasoning_phase=in_reasoning_phase,
+                            is_reasoning_model=is_reasoning_model,
+                        )
+                    )
+                    
+                    for segment_type, segment_text in segments:
+                        if not segment_text:
+                            continue
+                        
+                        if segment_type == "reasoning":
+                            current_reasoning += segment_text
+                            yield {
+                                "type": "reasoning_token",
+                                "data": {
+                                    "token": segment_text,
+                                    "cumulative_reasoning": current_reasoning,
+                                },
+                            }
+                        else:
+                            current_response += segment_text
+                            yield {
+                                "type": "token",
+                                "data": {
+                                    "token": segment_text,
+                                    "cumulative_response": current_response,
+                                },
+                            }
+                        
+                        await asyncio.sleep(0)
 
                 logger.info(
                     f"[Token Streaming] Completed streaming {event_count} events"
@@ -1033,13 +1213,22 @@ class ADKAgentWrapper:
                 return
 
             # Send completion signal with model info and pipeline metrics/metadata
-            logger.info(
-                f"[Token Streaming] Sending completion signal (model: {resolved_model})"
-            )
             reasoning_length = (
                 len(current_reasoning.strip()) if current_reasoning.strip() else 0
             )
             response_length = len(current_response.strip())
+            
+            logger.info(
+                f"[Token Streaming] COMPLETE - Model: {resolved_model}, "
+                f"Reasoning: {reasoning_length} chars, Response: {response_length} chars, "
+                f"Events processed: {event_count}"
+            )
+            
+            # Log summary of what was extracted
+            if reasoning_length > 0:
+                logger.info(f"[Token Streaming] Reasoning preview: {current_reasoning[:200]}...")
+            else:
+                logger.warning("[Token Streaming] No reasoning content was extracted from the model response")
 
             complete_data = {
                 "model": resolved_model,
@@ -1067,6 +1256,159 @@ class ADKAgentWrapper:
         except Exception as e:
             logger.error(f"Error in token streaming: {e}", exc_info=True)
             yield {"type": "error", "data": {"error": str(e)}}
+
+    async def process_message_stream_litellm(
+        self,
+        message: str,
+        session_id: Optional[str] = None,
+        model: Optional[str] = None,
+        config: Optional[ContextEngineeringConfig] = None,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        Stream tokens using LiteLLM directly to access reasoning_content.
+        
+        This method bypasses ADK's abstraction to get access to LiteLLM's
+        reasoning_content field which contains the model's thinking process
+        from Qwen and other thinking-capable models.
+        
+        Args:
+            message: User's message
+            session_id: Optional session ID
+            model: Optional model name (e.g., "qwen3:8b")
+            config: Optional context engineering configuration
+            
+        Yields:
+            Dictionary events for reasoning_token, token, tool_call, complete, error
+        """
+        resolved_model = model if model else "qwen3:4b"
+        logger.info(
+            f"[LiteLLM Streaming] Processing with model '{resolved_model}': {message[:50]}..."
+        )
+        
+        current_reasoning = ""
+        current_response = ""
+        
+        try:
+            # Build the full model name for LiteLLM
+            litellm_model = f"ollama_chat/{resolved_model}"
+            
+            # Build system message with our instruction
+            system_message = {"role": "system", "content": INSTRUCTION}
+            
+            # Process pipeline context if config provided
+            enriched_message = message
+            pipeline_metrics = {}
+            if config:
+                pipeline = ContextPipeline(config)
+                pipeline_context = pipeline.process(
+                    query=message,
+                    conversation_history=[],
+                )
+                pipeline_metrics = pipeline.get_aggregated_metrics()
+                
+                if pipeline_context.context:
+                    enriched_message = f"{pipeline_context.context}\n\nUser Query: {message}"
+                    logger.info(
+                        f"[LiteLLM Streaming] Enriched message with pipeline context ({len(pipeline_context.context)} chars)"
+                    )
+            
+            # Build messages
+            messages = [
+                system_message,
+                {"role": "user", "content": enriched_message}
+            ]
+            
+            # IMPORTANT: Do NOT pass tools to LiteLLM for streaming mode
+            # Ollama's reasoning_content (thinking) feature is DISABLED when tools are provided
+            # The model will answer directly and show its thinking process
+            # For tool functionality, use the ADK streaming method instead
+            logger.info(f"[LiteLLM Streaming] Starting stream WITHOUT tools (enables reasoning_content)")
+            
+            # Call LiteLLM directly with streaming - NO TOOLS to enable reasoning
+            response = litellm.completion(
+                model=litellm_model,
+                messages=messages,
+                api_base="http://localhost:11434",
+                stream=True,
+                # tools=None intentionally - passing tools disables Ollama's reasoning mode
+            )
+            
+            chunk_count = 0
+            
+            for chunk in response:
+                chunk_count += 1
+                
+                if not chunk.choices:
+                    continue
+                    
+                delta = chunk.choices[0].delta
+                
+                # Check for reasoning_content (LiteLLM extracts <think> tags here)
+                # This is the model's thinking/deliberation process
+                reasoning = getattr(delta, 'reasoning_content', None)
+                if reasoning:
+                    current_reasoning += reasoning
+                    logger.debug(f"[LiteLLM Streaming] Chunk {chunk_count}: reasoning ({len(reasoning)} chars)")
+                    yield {
+                        "type": "reasoning_token",
+                        "data": {
+                            "token": reasoning,
+                            "cumulative_reasoning": current_reasoning,
+                        },
+                    }
+                    await asyncio.sleep(0)
+                
+                # Check for content (the actual response)
+                content = getattr(delta, 'content', None)
+                if content:
+                    current_response += content
+                    logger.debug(f"[LiteLLM Streaming] Chunk {chunk_count}: content ({len(content)} chars)")
+                    yield {
+                        "type": "token",
+                        "data": {
+                            "token": content,
+                            "cumulative_response": current_response,
+                        },
+                    }
+                    await asyncio.sleep(0)
+            
+            # Log completion
+            reasoning_length = len(current_reasoning.strip())
+            response_length = len(current_response.strip())
+            
+            logger.info(
+                f"[LiteLLM Streaming] COMPLETE - Model: {resolved_model}, "
+                f"Reasoning: {reasoning_length} chars, Response: {response_length} chars, "
+                f"Chunks: {chunk_count}"
+            )
+            
+            if reasoning_length > 0:
+                logger.info(f"[LiteLLM Streaming] Reasoning preview: {current_reasoning[:200]}...")
+            else:
+                logger.warning("[LiteLLM Streaming] No reasoning_content was received from LiteLLM")
+            
+            # Send completion
+            # Note: This streaming mode prioritizes showing reasoning over tool execution
+            # For tool functionality, use Token Streaming = OFF which uses ADK's run_async
+            yield {
+                "type": "complete",
+                "data": {
+                    "model": resolved_model,
+                    "reasoning_length": reasoning_length,
+                    "response_length": response_length,
+                    "pipeline_metrics": pipeline_metrics,
+                },
+            }
+            
+        except Exception as e:
+            logger.error(f"[LiteLLM Streaming] Error: {e}", exc_info=True)
+            yield {
+                "type": "error",
+                "data": {
+                    "error": str(e),
+                    "suggestion": "Check if Ollama is running and the model is available",
+                },
+            }
 
     async def process_message_stream(
         self,

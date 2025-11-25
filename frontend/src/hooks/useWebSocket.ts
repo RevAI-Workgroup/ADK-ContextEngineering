@@ -224,16 +224,23 @@ export function useWebSocket(options: UseWebSocketOptions = {}) {
     model?: string,
     clearEvents?: boolean,
     sessionId?: string,
-    enableTokenStreaming?: boolean
+    enableTokenStreaming?: boolean,
+    config?: Record<string, unknown>
   ): boolean => {
     if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-      const payload = {
+      const payload: Record<string, unknown> = {
         type: 'message',
         message,
         session_id: sessionId,
         selectedModel: model,
         enableTokenStreaming: enableTokenStreaming || false,
       }
+      
+      // Include config if provided (for context engineering techniques)
+      if (config) {
+        payload.config = config
+      }
+      
       ws.current.send(JSON.stringify(payload))
       
       // Clear events only if explicitly requested via parameter,
