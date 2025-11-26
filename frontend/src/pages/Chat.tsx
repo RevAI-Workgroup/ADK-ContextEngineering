@@ -11,7 +11,7 @@ import { Trash2, XCircle, ChevronDown, ChevronUp, Zap } from 'lucide-react'
 import { useChatContext } from '../contexts/ChatContext'
 import { modelsService } from '../services/modelsService'
 import { agentService } from '../services/agentService'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { Alert, AlertDescription } from '../components/ui/alert'
 import { ContextEngineeringConfig } from '../types/config.types'
 import { cn } from '../lib/utils'
@@ -29,6 +29,10 @@ export function Chat() {
   const [showComparison, setShowComparison] = useState(false)
   const [availableTools, setAvailableTools] = useState<Tool[]>([])
   const [activeTools, setActiveTools] = useState<Set<string>>(new Set())
+  const chatInterfaceRef = useRef<HTMLDivElement>(null)
+  const sidebarRef = useRef<HTMLDivElement>(null)
+  const availableToolsRef = useRef<HTMLDivElement>(null)
+  const [sidebarPaddingTop, setSidebarPaddingTop] = useState('8.8rem')
 
   // Fetch available tools when config changes
   useEffect(() => {
@@ -98,6 +102,60 @@ export function Chat() {
     }
   }, [messages])
 
+  // Align sidebar buttons with ChatInterface card
+  // Use useLayoutEffect for synchronous DOM measurements before paint to avoid visual delay
+  useLayoutEffect(() => {
+    const updateSidebarAlignment = () => {
+      if (chatInterfaceRef.current && sidebarRef.current) {
+        // Find the Card element inside ChatInterface (the chat display card)
+        // It's the Card with flex-1 class that contains the messages
+        const cardElement = chatInterfaceRef.current.querySelector('.flex-1.overflow-y-auto.rounded-xl') as HTMLElement
+        if (cardElement) {
+          const cardRect = cardElement.getBoundingClientRect()
+          const sidebarRect = sidebarRef.current.getBoundingClientRect()
+          const offsetTop = cardRect.top - sidebarRect.top
+          setSidebarPaddingTop(`${Math.max(0, offsetTop)}px`)
+        } else {
+          // Fallback: use the wrapper if card not found
+          const chatInterfaceRect = chatInterfaceRef.current.getBoundingClientRect()
+          const sidebarRect = sidebarRef.current.getBoundingClientRect()
+          const offsetTop = chatInterfaceRect.top - sidebarRect.top
+          setSidebarPaddingTop(`${Math.max(0, offsetTop)}px`)
+        }
+      }
+    }
+
+    // Immediate update - useLayoutEffect runs synchronously before paint
+    // This ensures alignment happens before the user sees any misalignment
+    updateSidebarAlignment()
+    
+    // Use ResizeObserver to catch any layout changes (e.g., CSS transitions, content changes)
+    // Call immediately without RAF delay for responsive updates
+    let resizeObserver: ResizeObserver | null = null
+    if ('ResizeObserver' in window) {
+      resizeObserver = new ResizeObserver(updateSidebarAlignment)
+      // Observe both ChatInterface and Available Tools to catch all layout changes
+      if (chatInterfaceRef.current) {
+        resizeObserver.observe(chatInterfaceRef.current)
+      }
+      if (availableToolsRef.current) {
+        resizeObserver.observe(availableToolsRef.current)
+      }
+    }
+    
+    // Also update on window resize and scroll
+    window.addEventListener('resize', updateSidebarAlignment, { passive: true })
+    window.addEventListener('scroll', updateSidebarAlignment, { capture: true, passive: true })
+    
+    return () => {
+      if (resizeObserver) {
+        resizeObserver.disconnect()
+      }
+      window.removeEventListener('resize', updateSidebarAlignment)
+      window.removeEventListener('scroll', updateSidebarAlignment, true)
+    }
+  }, [isToolsExpanded, clearMessage, rerunMessage])
+
   const handleClearModels = async () => {
     setIsClearing(true)
     setClearMessage(null)
@@ -151,8 +209,8 @@ export function Chat() {
   return (
     <div className="flex gap-6 p-6">
       {/* Left Sidebar - Configuration & Run History */}
-      <div className="w-80 flex flex-col" style={{ paddingTop: '8.8rem' }}>
-        <div className="space-y-4">
+      <div ref={sidebarRef} className="w-80 flex flex-col">
+        <div className="space-y-4" style={{ paddingTop: sidebarPaddingTop }}>
           <Button
             variant={showConfigPanel ? 'default' : 'outline'}
             className="w-full"
@@ -282,7 +340,7 @@ export function Chat() {
         )}
 
         {/* Available Tools Info */}
-        <div className="flex justify-center w-full">
+        <div ref={availableToolsRef} className="flex justify-center w-full">
           <Card className="inline-block">
             <CardHeader 
               className="cursor-pointer hover:bg-accent/50 transition-colors flex items-center justify-center py-3"
@@ -322,7 +380,7 @@ export function Chat() {
         </div>
 
         {/* Chat Interface */}
-        <div className="flex flex-col items-center w-full">
+        <div ref={chatInterfaceRef} className="flex flex-col items-center w-full">
           <div className="w-full">
             <ChatInterface useRealtime={tokenStreamingEnabled} />
           </div>
