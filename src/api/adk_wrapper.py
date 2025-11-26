@@ -901,6 +901,7 @@ class ADKAgentWrapper:
 
             current_reasoning = ""
             current_response = ""
+            tool_calls = []  # Track tool calls during streaming
             in_reasoning_phase = False
             in_explicit_think_tag = False  # Track if we're inside explicit <think> tags
             # With stream=True in LiteLLM, we get real token-level streaming from Ollama
@@ -1383,6 +1384,11 @@ class ADKAgentWrapper:
             if enabled_techniques is not None:
                 complete_data["enabled_techniques"] = enabled_techniques
                 logger.debug(f"Including enabled techniques: {enabled_techniques}")
+
+            # Include tool calls if any were detected
+            if tool_calls:
+                complete_data["tool_calls"] = tool_calls
+                logger.info(f"[Token Streaming] Including {len(tool_calls)} tool call(s) in complete event")
 
             yield {"type": "complete", "data": complete_data}
 

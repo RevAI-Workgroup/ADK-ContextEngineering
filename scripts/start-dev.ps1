@@ -113,12 +113,11 @@ try {
     Start-Sleep -Seconds 2  # Give backend a moment to start
     $backendReady = Test-BackendHealth
     
-    if (-not $backendReady) {
-        Write-Log "BACKEND" "Proceeding with frontend startup despite health check timeout" "Yellow"
+    if ($backendReady) {
+        Write-Log "SYSTEM" "Backend is ready, starting frontend..." "Cyan"
+    } else {
+        Write-Log "BACKEND" "Health check timed out; starting frontend anyway..." "Yellow"
     }
-
-    # Start frontend only after backend is ready
-    Write-Log "SYSTEM" "Backend is ready, starting frontend..." "Cyan"
     Write-Log "FRONTEND" "Starting Vite dev server..." "Green"
     $FrontendJob = Start-Job -ScriptBlock {
         Set-Location "$using:PSScriptRoot\frontend"
