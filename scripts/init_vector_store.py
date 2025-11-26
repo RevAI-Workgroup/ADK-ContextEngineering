@@ -14,6 +14,12 @@ from pathlib import Path
 # This prevents the "capture() takes 1 positional argument but 3 were given" warning
 os.environ.setdefault("CHROMA_TELEMETRY_ENABLED", "false")
 
+# Fix Windows encoding issues - force UTF-8 output
+# This prevents UnicodeEncodeError with cp1252 codec on Windows
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
 # Add project root to path (dynamically determine it)
 project_root = Path(__file__).parent.parent.absolute()
 sys.path.insert(0, str(project_root))
@@ -36,16 +42,16 @@ def initialize_vector_store():
         # Check if already populated
         count = vector_store.count()
         if count > 0:
-            print(f"   ✓ Vector store already contains {count} documents")
+            print(f"   [OK] Vector store already contains {count} documents")
             print("   Skipping initialization (clear store to re-initialize)")
             return
 
-        print("   ✓ ChromaDB initialized successfully")
+        print("   [OK] ChromaDB initialized successfully")
 
         # Load test documents
         kb_dir = "data/knowledge_base"
         if not os.path.exists(kb_dir):
-            print(f"   ⚠ Knowledge base directory not found: {kb_dir}")
+            print(f"   [WARNING] Knowledge base directory not found: {kb_dir}")
             print("   Skipping document ingestion")
             return
 
@@ -57,10 +63,10 @@ def initialize_vector_store():
         )
 
         if not documents:
-            print("   ⚠ No documents found to ingest")
+            print("   [WARNING] No documents found to ingest")
             return
 
-        print(f"   ✓ Loaded {len(documents)} documents")
+        print(f"   [OK] Loaded {len(documents)} documents")
 
         # Chunk documents
         print("\n3. Chunking documents...")
@@ -76,7 +82,7 @@ def initialize_vector_store():
             all_chunks.extend(chunks)
             print(f"   - {doc.metadata.get('filename')}: {len(chunks)} chunks")
 
-        print(f"   ✓ Created {len(all_chunks)} total chunks")
+        print(f"   [OK] Created {len(all_chunks)} total chunks")
 
         # Add to vector store
         print("\n4. Adding chunks to vector store...")
@@ -88,17 +94,17 @@ def initialize_vector_store():
             metadatas=chunk_metadatas
         )
 
-        print(f"   ✓ Added {len(ids)} chunks to vector store")
+        print(f"   [OK] Added {len(ids)} chunks to vector store")
 
         # Verify
         print("\n5. Verifying vector store...")
         stats = vector_store.get_stats()
-        print(f"   ✓ Total documents: {stats['total_documents']}")
-        print(f"   ✓ Unique sources: {stats['unique_sources']}")
-        print(f"   ✓ Storage size: {stats['storage_size_mb']:.2f} MB")
+        print(f"   [OK] Total documents: {stats['total_documents']}")
+        print(f"   [OK] Unique sources: {stats['unique_sources']}")
+        print(f"   [OK] Storage size: {stats['storage_size_mb']:.2f} MB")
 
         print("\n" + "="*60)
-        print("✅ Vector Store Initialization Complete!")
+        print("[SUCCESS] Vector Store Initialization Complete!")
         print("="*60)
         print("\nYou can now:")
         print("  - Test search: curl 'http://localhost:8000/api/vector-store/search?query=Python'")
@@ -107,12 +113,12 @@ def initialize_vector_store():
         print()
 
     except ImportError as e:
-        print(f"\n✗ Import Error: {e}")
+        print(f"\n[ERROR] Import Error: {e}")
         print("\nMissing dependencies? Run:")
         print("  pip install chromadb sentence-transformers tiktoken")
         sys.exit(1)
     except Exception as e:
-        print(f"\n✗ Error: {e}")
+        print(f"\n[ERROR] {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)

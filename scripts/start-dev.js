@@ -146,10 +146,11 @@ function startBackend() {
     
     if (isWindows) {
       // Windows: Use cmd to run activation and uvicorn
+      // IMPORTANT: Use 'call' before activate.bat to ensure the command chain continues
+      // Without 'call', the && chain breaks after the batch file executes
       // Set CHROMA_TELEMETRY_ENABLED=false to prevent ChromaDB telemetry warning
-      backendProcess = spawn('cmd', ['/c', `venv\\Scripts\\activate && set PYTHONPATH=${rootDir} && set CHROMA_TELEMETRY_ENABLED=false && uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000`], {
+      backendProcess = spawn('cmd', ['/c', `call venv\\Scripts\\activate.bat && set "PYTHONPATH=${rootDir}" && set "CHROMA_TELEMETRY_ENABLED=false" && uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000`], {
         cwd: rootDir,
-        shell: true,
         stdio: 'pipe'
       });
     } else {
@@ -354,8 +355,9 @@ async function main() {
     log('VECTOR STORE', 'Checking ChromaDB initialization...', colors.cyan);
     try {
       // Set PYTHONPATH and disable ChromaDB telemetry to prevent warning messages
+      // On Windows: Use 'call' before activate.bat to ensure command chain continues
       const initCmd = isWindows
-        ? `venv\\Scripts\\activate && set PYTHONPATH=${rootDir} && set CHROMA_TELEMETRY_ENABLED=false && python scripts\\init_vector_store.py`
+        ? `call venv\\Scripts\\activate.bat && set "PYTHONPATH=${rootDir}" && set "CHROMA_TELEMETRY_ENABLED=false" && python scripts\\init_vector_store.py`
         : `source venv/bin/activate && export PYTHONPATH="$PYTHONPATH:${rootDir}" && export CHROMA_TELEMETRY_ENABLED=false && python3 scripts/init_vector_store.py`;
       
       const shell = isWindows ? 'cmd' : 'bash';
