@@ -41,47 +41,99 @@ function log(prefix, message, color = colors.reset) {
 function checkBackendHealth(maxAttempts = 30, intervalMs = 1000) {
   return new Promise((resolve) => {
     let attempts = 0;
+    let resolved = false;
+    let pendingTimeouts = [];
+    let currentRequest = null;
+    
+    const cleanup = () => {
+      // Clear all pending timeouts
+      pendingTimeouts.forEach(timeout => clearTimeout(timeout));
+      pendingTimeouts = [];
+      
+      // Abort current request if it exists
+      if (currentRequest) {
+        currentRequest.destroy();
+        currentRequest = null;
+      }
+    };
     
     const checkHealth = () => {
+      // Stop if already resolved
+      if (resolved) {
+        return;
+      }
+      
       attempts++;
       
       const req = http.get('http://localhost:8000/health', (res) => {
+        // Stop if already resolved
+        if (resolved) {
+          req.destroy();
+          return;
+        }
+        
         if (res.statusCode === 200) {
+          resolved = true;
           log('BACKEND', 'Health check passed - backend is ready!', colors.green);
+          cleanup();
           resolve(true);
         } else {
           if (attempts < maxAttempts) {
-            setTimeout(checkHealth, intervalMs);
+            const timeout = setTimeout(checkHealth, intervalMs);
+            pendingTimeouts.push(timeout);
           } else {
+            resolved = true;
             log('BACKEND', 'Health check failed - backend did not become ready in time', colors.yellow);
+            cleanup();
             resolve(false);
           }
         }
       });
       
+      currentRequest = req;
+      
       req.on('error', () => {
+        // Stop if already resolved
+        if (resolved) {
+          return;
+        }
+        
         if (attempts < maxAttempts) {
           // Backend not ready yet, try again
-          setTimeout(checkHealth, intervalMs);
+          const timeout = setTimeout(checkHealth, intervalMs);
+          pendingTimeouts.push(timeout);
         } else {
+          resolved = true;
           log('BACKEND', 'Health check failed - backend did not become ready in time', colors.yellow);
+          cleanup();
           resolve(false);
         }
       });
       
       req.setTimeout(500, () => {
         req.destroy();
+        currentRequest = null;
+        
+        // Stop if already resolved
+        if (resolved) {
+          return;
+        }
+        
         if (attempts < maxAttempts) {
-          setTimeout(checkHealth, intervalMs);
+          const timeout = setTimeout(checkHealth, intervalMs);
+          pendingTimeouts.push(timeout);
         } else {
+          resolved = true;
           log('BACKEND', 'Health check failed - backend did not become ready in time', colors.yellow);
+          cleanup();
           resolve(false);
         }
       });
     };
     
     // Start checking after a short delay to give backend time to start
-    setTimeout(checkHealth, 2000);
+    const initialTimeout = setTimeout(checkHealth, 2000);
+    pendingTimeouts.push(initialTimeout);
   });
 }
 
@@ -261,9 +313,9 @@ process.on('exit', cleanup);
 
 // Main execution
 async function main() {
-  console.log(`\n${colors.cyan}${colors.bright}╔═══════════════════════════════════════════╗${colors.reset}`);
+  console.log(`\n${colors.cyan}${colors.bright}╔══════════════════════════════════════════╗${colors.reset}`);
   console.log(`${colors.cyan}${colors.bright}║   ADK Context Engineering - Dev Server   ║${colors.reset}`);
-  console.log(`${colors.cyan}${colors.bright}╚═══════════════════════════════════════════╝${colors.reset}\n`);
+  console.log(`${colors.cyan}${colors.bright}╚══════════════════════════════════════════╝${colors.reset}\n`);
   
   log('SYSTEM', `Platform: ${os.platform()} (${os.arch()})`, colors.cyan);
   log('SYSTEM', `Node.js: ${process.version}`, colors.cyan);
@@ -348,13 +400,13 @@ async function main() {
     log('SYSTEM', 'Backend is ready, starting frontend...', colors.cyan);
     await startFrontend();
 
-    console.log(`\n${colors.cyan}${colors.bright}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${colors.reset}`);
+    console.log(`\n${colors.cyan}${colors.bright}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${colors.reset}`);
     log('SYSTEM', '✨ Development servers are running!', colors.cyan);
-    console.log(`${colors.cyan}${colors.bright}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${colors.reset}`);
+    console.log(`${colors.cyan}${colors.bright}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${colors.reset}`);
     log('BACKEND', 'http://localhost:8000 (API)', colors.blue);
     log('BACKEND', 'http://localhost:8000/docs (API Docs)', colors.blue);
     log('FRONTEND', 'http://localhost:5173 (UI)', colors.green);
-    console.log(`${colors.cyan}${colors.bright}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${colors.reset}`);
+    console.log(`${colors.cyan}${colors.bright}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${colors.reset}`);
     log('SYSTEM', 'Press Ctrl+C to stop all servers\n', colors.yellow);
 
   } catch (error) {
