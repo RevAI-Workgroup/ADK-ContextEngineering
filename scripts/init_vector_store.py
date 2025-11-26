@@ -10,6 +10,10 @@ import sys
 import os
 from pathlib import Path
 
+# Disable ChromaDB telemetry before importing any modules that use chromadb
+# This prevents the "capture() takes 1 positional argument but 3 were given" warning
+os.environ.setdefault("CHROMA_TELEMETRY_ENABLED", "false")
+
 # Add project root to path (dynamically determine it)
 project_root = Path(__file__).parent.parent.absolute()
 sys.path.insert(0, str(project_root))

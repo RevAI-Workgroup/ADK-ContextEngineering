@@ -146,7 +146,8 @@ function startBackend() {
     
     if (isWindows) {
       // Windows: Use cmd to run activation and uvicorn
-      backendProcess = spawn('cmd', ['/c', `venv\\Scripts\\activate && set PYTHONPATH=${rootDir} && uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000`], {
+      // Set CHROMA_TELEMETRY_ENABLED=false to prevent ChromaDB telemetry warning
+      backendProcess = spawn('cmd', ['/c', `venv\\Scripts\\activate && set PYTHONPATH=${rootDir} && set CHROMA_TELEMETRY_ENABLED=false && uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000`], {
         cwd: rootDir,
         shell: true,
         stdio: 'pipe'
@@ -154,7 +155,8 @@ function startBackend() {
     } else {
       // Unix (macOS/Linux): Use bash to source activation and run uvicorn
       // Match start-dev.sh: export PYTHONPATH="${PYTHONPATH}:$(pwd)"
-      backendProcess = spawn('bash', ['-c', `source venv/bin/activate && export PYTHONPATH="$PYTHONPATH:${rootDir}" && uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000`], {
+      // Set CHROMA_TELEMETRY_ENABLED=false to prevent ChromaDB telemetry warning
+      backendProcess = spawn('bash', ['-c', `source venv/bin/activate && export PYTHONPATH="$PYTHONPATH:${rootDir}" && export CHROMA_TELEMETRY_ENABLED=false && uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000`], {
         cwd: rootDir,
         stdio: 'pipe'
       });
@@ -338,7 +340,6 @@ async function main() {
 
     // Check if workspace dependencies are installed
     const nodeModulesPath = path.join(rootDir, 'node_modules');
-    const frontendNodeModulesPath = path.join(rootDir, 'frontend', 'node_modules');
 
     if (!fs.existsSync(nodeModulesPath)) {
       log('ERROR', 'Workspace dependencies not found!', colors.red);
@@ -346,39 +347,50 @@ async function main() {
       log('ERROR', '(Run from project root, not from frontend directory)', colors.red);
       process.exit(1);
     }
-
-    // Warn if frontend has its own node_modules (incorrect workspace setup)
-    if (fs.existsSync(frontendNodeModulesPath)) {
-      log('WARNING', 'Frontend has its own node_modules directory!', colors.yellow);
-      log('WARNING', 'This may indicate incorrect workspace setup.', colors.yellow);
-      const cleanupCmd = isWindows
-        ? 'rmdir /s /q frontend\\node_modules && pnpm install'
-        : 'rm -rf frontend/node_modules && pnpm install';
-      log('WARNING', `Consider running: ${cleanupCmd}`, colors.yellow);
-    }
+    // Note: In a pnpm workspace, frontend/node_modules is expected to exist
+    // (pnpm creates symlinks there). This is normal behavior.
 
     // Initialize Vector Store (if not already initialized)
     log('VECTOR STORE', 'Checking ChromaDB initialization...', colors.cyan);
     try {
+      // Set PYTHONPATH and disable ChromaDB telemetry to prevent warning messages
       const initCmd = isWindows
-        ? `venv\\Scripts\\activate && python scripts\\init_vector_store.py`
-        : `source venv/bin/activate && python3 scripts/init_vector_store.py`;
+        ? `venv\\Scripts\\activate && set PYTHONPATH=${rootDir} && set CHROMA_TELEMETRY_ENABLED=false && python scripts\\init_vector_store.py`
+        : `source venv/bin/activate && export PYTHONPATH="$PYTHONPATH:${rootDir}" && export CHROMA_TELEMETRY_ENABLED=false && python3 scripts/init_vector_store.py`;
       
       const shell = isWindows ? 'cmd' : 'bash';
       const shellArgs = isWindows ? ['/c', initCmd] : ['-c', initCmd];
       
       const initProcess = spawn(shell, shellArgs, {
         cwd: rootDir,
-        stdio: 'pipe',
-        shell: true
+        stdio: 'pipe'
+      });
+
+      // Capture output from the init process
+      initProcess.stdout.on('data', (data) => {
+        const output = data.toString().trim();
+        if (output) {
+          output.split('\n').forEach(line => {
+            log('VECTOR STORE', line, colors.cyan);
+          });
+        }
+      });
+
+      initProcess.stderr.on('data', (data) => {
+        const output = data.toString().trim();
+        if (output) {
+          output.split('\n').forEach(line => {
+            log('VECTOR STORE', line, colors.yellow);
+          });
+        }
       });
 
       await new Promise((resolve) => {
         initProcess.on('close', (code) => {
           if (code === 0) {
-            log('VECTOR STORE', 'Vector store initialized successfully', colors.cyan);
+            log('VECTOR STORE', 'Vector store initialization complete', colors.cyan);
           } else {
-            log('WARNING', 'Vector store initialization failed (non-critical)', colors.yellow);
+            log('WARNING', `Vector store initialization exited with code ${code} (non-critical)`, colors.yellow);
             const activateCmd = isWindows 
               ? 'venv\\Scripts\\activate && python scripts\\init_vector_store.py'
               : 'source venv/bin/activate && python3 scripts/init_vector_store.py';
