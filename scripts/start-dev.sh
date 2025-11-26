@@ -91,7 +91,8 @@ fi
 
 # Initialize Vector Store (if not already initialized)
 log "VECTOR STORE" "Checking ChromaDB initialization..." "$CYAN"
-if (source venv/bin/activate && python3 scripts/init_vector_store.py > /dev/null 2>&1); then
+# Set CHROMA_TELEMETRY_ENABLED=false to prevent telemetry warning
+if (source venv/bin/activate && export CHROMA_TELEMETRY_ENABLED=false && python3 scripts/init_vector_store.py > /dev/null 2>&1); then
     log "VECTOR STORE" "Vector store initialized successfully" "$CYAN"
 else
     log "WARNING" "Vector store initialization failed (non-critical)" "$YELLOW"
@@ -103,6 +104,8 @@ log "BACKEND" "Starting FastAPI server..." "$BLUE"
 (
     source venv/bin/activate
     export PYTHONPATH="${PYTHONPATH}:$(pwd)"
+    # Disable ChromaDB telemetry to prevent warning messages
+    export CHROMA_TELEMETRY_ENABLED=false
     uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000 2>&1 | while IFS= read -r line; do
         log "BACKEND" "$line" "$BLUE"
     done

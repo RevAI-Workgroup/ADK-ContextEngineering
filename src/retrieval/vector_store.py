@@ -5,6 +5,11 @@ This module provides a wrapper around ChromaDB for managing document embeddings,
 similarity search, and vector storage operations.
 """
 
+import os
+# Disable ChromaDB telemetry before importing chromadb
+# This must be set before the chromadb import to prevent telemetry errors
+os.environ.setdefault("CHROMA_TELEMETRY_ENABLED", "false")
+
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 import logging

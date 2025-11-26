@@ -39,10 +39,27 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
     reasoning: string
     response: string
     messageId: string
+    toolCalls: ToolCall[]
   } | null>(null)
 
   // Track last processed event to avoid re-processing on every update
   const lastProcessedEventIndex = useRef<number>(-1)
+
+  // Track when we're in the process of establishing connection for a message send
+  // This prevents false positive "connection lost" errors during initial connect
+  const isConnectingRef = useRef<boolean>(false)
+
+  // Track timeout for delayed disconnection error
+  const disconnectionTimeoutRef = useRef<number | null>(null)
+
+  // Cleanup disconnection timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (disconnectionTimeoutRef.current) {
+        clearTimeout(disconnectionTimeoutRef.current)
+      }
+    }
+  }, [])
 
   // Monitor WebSocket connection errors during processing
   useEffect(() => {
@@ -72,11 +89,43 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
   }, [wsError, isProcessing, useRealtime, setErrorMessage, setIsProcessing])
 
   // Monitor WebSocket disconnections during processing
+  // Uses a delay to prevent false positives during connection establishment or brief reconnects
   useEffect(() => {
-    if (useRealtime && !isConnected && isProcessing) {
-      console.warn('WebSocket disconnected during processing')
-      setErrorMessage('Connection lost during streaming. Attempting to reconnect...')
-      // The useWebSocket hook will handle reconnection automatically
+    // Clear any pending timeout when dependencies change
+    if (disconnectionTimeoutRef.current) {
+      clearTimeout(disconnectionTimeoutRef.current)
+      disconnectionTimeoutRef.current = null
+    }
+
+    // Don't show disconnection error if:
+    // - Not using realtime mode
+    // - WebSocket is connected
+    // - Not currently processing
+    // - Currently in the process of establishing initial connection
+    if (!useRealtime || isConnected || !isProcessing || isConnectingRef.current) {
+      return
+    }
+
+    // Add a delay before showing the disconnection error
+    // This gives the WebSocket reconnection logic time to work
+    // and prevents false positives during normal operation
+    console.log('[ChatInterface] WebSocket disconnected during processing, waiting before showing error...')
+    
+    disconnectionTimeoutRef.current = window.setTimeout(() => {
+      // Double-check conditions after the delay
+      // The refs may have changed during the timeout
+      if (!isConnectingRef.current) {
+        console.warn('[ChatInterface] WebSocket disconnection confirmed after delay')
+        setErrorMessage('Connection lost during streaming. Attempting to reconnect...')
+      }
+      disconnectionTimeoutRef.current = null
+    }, 2000) // 2 second delay before showing error
+
+    return () => {
+      if (disconnectionTimeoutRef.current) {
+        clearTimeout(disconnectionTimeoutRef.current)
+        disconnectionTimeoutRef.current = null
+      }
     }
   }, [isConnected, isProcessing, useRealtime, setErrorMessage])
 
@@ -88,21 +137,32 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
     const newEvents = events.slice(lastProcessedEventIndex.current + 1)
     
     newEvents.forEach((event) => {
+      // Debug logging for all event types
+      console.log(`[ChatInterface] Processing event: ${event.type}`, {
+        dataKeys: Object.keys(event.data || {}),
+        tokenStreamingEnabled,
+        hasStreamingContent: !!streamingContent
+      })
+
       switch (event.type) {
         case 'token': {
           // Token streaming mode - accumulate response tokens
           if (tokenStreamingEnabled) {
+            const tokenText = event.data.token
+            console.log(`[ChatInterface] 📝 Response token (${tokenText.length} chars):`, tokenText.slice(0, 50))
+            
             // Guard: early return if streamingContent is not initialized
             // This ensures we reuse the messageId from handleSendMessage
             setStreamingContent(prev => {
               if (!prev) {
-                console.warn('Token event received before streamingContent initialization, ignoring')
+                console.warn('[ChatInterface] Token event received before streamingContent initialization, ignoring')
                 return null
               }
               return {
                 reasoning: prev.reasoning,
-                response: prev.response + event.data.token,
-                messageId: prev.messageId
+                response: prev.response + tokenText,
+                messageId: prev.messageId,
+                toolCalls: prev.toolCalls || []
               }
             })
           }
@@ -112,17 +172,23 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
         case 'reasoning_token': {
           // Token streaming mode - accumulate reasoning tokens
           if (tokenStreamingEnabled) {
+            const reasoningText = event.data.token
+            console.log(`[ChatInterface] 🧠 Reasoning token (${reasoningText.length} chars):`, reasoningText.slice(0, 50))
+            
             // Guard: early return if streamingContent is not initialized
             // This ensures we reuse the messageId from handleSendMessage
             setStreamingContent(prev => {
               if (!prev) {
-                console.warn('Reasoning token event received before streamingContent initialization, ignoring')
+                console.warn('[ChatInterface] Reasoning token event received before streamingContent initialization, ignoring')
                 return null
               }
+              const newReasoning = prev.reasoning + reasoningText
+              console.log(`[ChatInterface] 🧠 Cumulative reasoning now ${newReasoning.length} chars`)
               return {
-                reasoning: prev.reasoning + event.data.token,
+                reasoning: newReasoning,
                 response: prev.response,
-                messageId: prev.messageId
+                messageId: prev.messageId,
+                toolCalls: prev.toolCalls || []
               }
             })
           }
@@ -139,13 +205,24 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
 
         case 'tool_call': {
           // TypeScript now knows event.data is ToolCallEventData
-          if (streamingMessageRef.current) {
-            // Parse tool call message to extract structured data
+          // Handle both new structured format and legacy message format
+          let toolCall: ToolCall
+          
+          if (event.data.name) {
+            // New structured format with name, description, parameters
+            toolCall = {
+              name: event.data.name,
+              description: event.data.description || `Calling tool: ${event.data.name}`,
+              parameters: event.data.parameters,
+              timestamp: event.data.timestamp || event.timestamp
+            }
+          } else if (event.data.message) {
+            // Legacy format: parse tool call message to extract structured data
             // Expected format: "tool_name: description" or just description
             const message = event.data.message
             const colonIndex = message.indexOf(':')
             
-            const toolCall: ToolCall = colonIndex > 0 
+            toolCall = colonIndex > 0 
               ? {
                   name: message.substring(0, colonIndex).trim(),
                   description: message.substring(colonIndex + 1).trim(),
@@ -156,8 +233,70 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
                   description: message,
                   timestamp: event.timestamp
                 }
-            
+          } else {
+            // Fallback
+            toolCall = {
+              name: 'unknown',
+              description: 'Tool call detected',
+              timestamp: event.timestamp
+            }
+          }
+          
+          console.log('[ChatInterface] 🔧 Tool call event received:', toolCall.name, toolCall)
+          
+          // Track tool calls in standard mode
+          if (streamingMessageRef.current) {
             streamingMessageRef.current.toolCalls.push(toolCall)
+            console.log('[ChatInterface] Tool call added to standard mode, total:', streamingMessageRef.current.toolCalls.length)
+          }
+          
+          // Track tool calls in token streaming mode
+          if (tokenStreamingEnabled) {
+            setStreamingContent(prev => {
+              if (!prev) {
+                console.warn('[ChatInterface] Tool call event received before streamingContent initialization, ignoring')
+                return null
+              }
+              const updated = {
+                ...prev,
+                toolCalls: [...prev.toolCalls, toolCall]
+              }
+              console.log('[ChatInterface] Tool call added to token streaming mode, total:', updated.toolCalls.length)
+              return updated
+            })
+          }
+          break
+        }
+        
+        case 'tool_result': {
+          // Handle tool result event - update existing tool call with result
+          const resultData = event.data
+          console.log('[ChatInterface] 🔧 Tool result event received:', resultData.name, resultData.result)
+          
+          // Update tool call with result in standard mode
+          if (streamingMessageRef.current) {
+            const toolIndex = streamingMessageRef.current.toolCalls.findIndex(
+              tc => tc.name === resultData.name && !tc.result
+            )
+            if (toolIndex >= 0) {
+              streamingMessageRef.current.toolCalls[toolIndex].result = resultData.result
+              console.log('[ChatInterface] Tool result added to standard mode for:', resultData.name)
+            }
+          }
+          
+          // Update tool call with result in token streaming mode
+          if (tokenStreamingEnabled) {
+            setStreamingContent(prev => {
+              if (!prev) return null
+              const updatedToolCalls = prev.toolCalls.map(tc => {
+                if (tc.name === resultData.name && !tc.result) {
+                  return { ...tc, result: resultData.result }
+                }
+                return tc
+              })
+              console.log('[ChatInterface] Tool result added to token streaming mode for:', resultData.name)
+              return { ...prev, toolCalls: updatedToolCalls }
+            })
           }
           break
         }
@@ -185,15 +324,50 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
         case 'complete': {
           // TypeScript now knows event.data is CompleteEventData
           // Finalize the streaming message and add it to chat
+          console.log('[ChatInterface] ✅ COMPLETE event received', {
+            model: event.data?.model,
+            reasoning_length: event.data?.reasoning_length,
+            response_length: event.data?.response_length,
+            tokenStreamingEnabled,
+            hasStreamingContent: !!streamingContent
+          })
+          
+          // Clear any pending disconnection timeout since we completed successfully
+          if (disconnectionTimeoutRef.current) {
+            clearTimeout(disconnectionTimeoutRef.current)
+            disconnectionTimeoutRef.current = null
+          }
+          
           if (tokenStreamingEnabled && streamingContent) {
             // Token streaming mode: use accumulated content
             const finalReasoning = (streamingContent.reasoning || '').trimEnd()
             const finalResponse = streamingContent.response.trimEnd()
+            
+            console.log('[ChatInterface] 📊 Final content summary:', {
+              reasoningChars: finalReasoning.length,
+              responseChars: finalResponse.length,
+              reasoningPreview: finalReasoning.slice(0, 100),
+              responsePreview: finalResponse.slice(0, 100)
+            })
+            
+            // Merge tool calls from streaming content and complete event
+            const toolCallsFromStream = streamingContent.toolCalls || []
+            const toolCallsFromComplete = event.data?.tool_calls || []
+            const allToolCalls = [...toolCallsFromStream, ...toolCallsFromComplete]
+            
+            console.log('[ChatInterface] 📊 Finalizing message with tool calls:', {
+              fromStream: toolCallsFromStream.length,
+              fromComplete: toolCallsFromComplete.length,
+              total: allToolCalls.length,
+              toolCalls: allToolCalls
+            })
+            
             const assistantMessage: Message = {
               id: streamingContent.messageId,
               role: 'assistant',
               content: finalResponse,
               reasoning: finalReasoning ? finalReasoning : undefined,
+              toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
               timestamp: event.timestamp,
               model: event.data?.model || selectedModel || undefined,
               pipelineMetadata: event.data?.pipeline_metadata,
@@ -240,7 +414,13 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
 
         case 'error': {
           // TypeScript now knows event.data is ErrorEventData
-          console.error('WebSocket error event:', event.data)
+          console.error('[ChatInterface] ❌ ERROR event received:', event.data)
+          
+          // Clear any pending disconnection timeout
+          if (disconnectionTimeoutRef.current) {
+            clearTimeout(disconnectionTimeoutRef.current)
+            disconnectionTimeoutRef.current = null
+          }
           
           // Build comprehensive error message
           let errorMsg = event.data.message || event.data.error || 'An error occurred during real-time processing.'
@@ -276,6 +456,12 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
     // Clear any previous errors on retry
     setErrorMessage('')
     
+    // Clear any pending disconnection timeout
+    if (disconnectionTimeoutRef.current) {
+      clearTimeout(disconnectionTimeoutRef.current)
+      disconnectionTimeoutRef.current = null
+    }
+    
     const userMessage: Message = {
       id: Date.now().toString(),
       role: 'user',
@@ -288,7 +474,14 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
 
     try {
       if (useRealtime && !isConnected) {
-        await connect()
+        // Mark that we're establishing initial connection
+        // This prevents false "connection lost" errors
+        isConnectingRef.current = true
+        try {
+          await connect()
+        } finally {
+          isConnectingRef.current = false
+        }
       }
 
       if (useRealtime) {
@@ -299,6 +492,7 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
             reasoning: '',
             response: '',
             messageId: (Date.now() + 1).toString(),
+            toolCalls: [],
           })
         } else {
           // Standard mode - initialize the streaming message container
@@ -315,7 +509,8 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
           selectedModel || undefined, 
           true,
           undefined,
-          tokenStreamingEnabled  // Pass streaming preference
+          tokenStreamingEnabled,  // Pass streaming preference
+          config  // Pass context engineering config
         )
         if (!success) {
           // If sending failed, throw an error to be caught by the catch block
@@ -326,11 +521,18 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
         // Use HTTP for synchronous request
         const response = await sendHttpMessage(content, undefined, true, selectedModel, config)
 
+        // Convert thinking_steps array to reasoning string for CollapsibleReasoning component
+        // thinking_steps is an array of thinking step strings from the backend
+        const reasoningString = response.thinking_steps && response.thinking_steps.length > 0
+          ? response.thinking_steps.join('\n')
+          : undefined
+
         const assistantMessage: Message = {
           id: Date.now().toString(),
           role: 'assistant',
           content: response.response,
           thinking: response.thinking_steps,
+          reasoning: reasoningString,  // Also include as reasoning for CollapsibleReasoning
           toolCalls: response.tool_calls,
           timestamp: response.timestamp,
           model: response.model,
@@ -384,6 +586,8 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
         if (streamingContent) {
           setStreamingContent(null)
         }
+        // Ensure connecting flag is reset
+        isConnectingRef.current = false
       }
     } finally {
       // Only reset isProcessing for HTTP mode
@@ -420,7 +624,7 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
   }
 
   return (
-    <div className="flex flex-col h-[500px] w-full max-w-4xl gap-4">
+    <div className="flex flex-col h-[calc(100vh-300px)] min-h-[500px] w-full gap-4">
       {/* Error Banner */}
       {errorMessage && (
         <Alert variant="destructive">
@@ -463,6 +667,9 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
                     role: 'assistant',
                     content: streamingContent.response,
                     reasoning: streamingContent.reasoning,
+                    toolCalls: streamingContent.toolCalls && streamingContent.toolCalls.length > 0 
+                      ? streamingContent.toolCalls 
+                      : undefined,
                     timestamp: new Date().toISOString()
                   }}
                   isStreaming={true}

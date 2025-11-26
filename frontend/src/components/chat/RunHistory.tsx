@@ -22,8 +22,6 @@ import {
   GitCompare,
   Play,
   Clock,
-  ChevronDown,
-  ChevronUp,
 } from 'lucide-react'
 import { RunRecord, formatTimestamp } from '../../types/run.types'
 import { runHistoryService } from '../../services/runHistoryService'
@@ -48,7 +46,6 @@ export function RunHistory({ onCompareRuns, onRerunWithConfig, className }: RunH
   const [selectedRunIds, setSelectedRunIds] = useState<Set<string>>(new Set())
   const [searchQuery, setSearchQuery] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [isExpanded, setIsExpanded] = useState(true)
   const [showClearDialog, setShowClearDialog] = useState(false)
 
   // Load runs on mount
@@ -130,10 +127,7 @@ export function RunHistory({ onCompareRuns, onRerunWithConfig, className }: RunH
     <>
       <Card className={className}>
         <CardHeader className="pb-3">
-          <div
-            className="flex items-center justify-between cursor-pointer"
-            onClick={() => setIsExpanded(!isExpanded)}
-          >
+          <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <History className="h-5 w-5" />
               <CardTitle className="text-lg">Run History</CardTitle>
@@ -143,19 +137,11 @@ export function RunHistory({ onCompareRuns, onRerunWithConfig, className }: RunH
                 </Badge>
               )}
             </div>
-            {isExpanded ? (
-              <ChevronUp className="h-4 w-4" />
-            ) : (
-              <ChevronDown className="h-4 w-4" />
-            )}
           </div>
-          {isExpanded && (
-            <CardDescription className="mt-2">Last 8 runs with current query</CardDescription>
-          )}
+          <CardDescription className="mt-2">Last 8 runs with current query</CardDescription>
         </CardHeader>
 
-        {isExpanded && (
-          <CardContent className="space-y-4">
+        <CardContent className="space-y-4">
             {/* Search and Actions */}
             <div className="space-y-2">
               <div className="relative">
@@ -168,28 +154,36 @@ export function RunHistory({ onCompareRuns, onRerunWithConfig, className }: RunH
                 />
               </div>
 
-              <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" onClick={loadRuns} disabled={isLoading}>
-                  <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
-                  Refresh
+              <div className="flex items-center gap-2 overflow-hidden">
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={loadRuns} 
+                  disabled={isLoading}
+                  className="flex-shrink min-w-0"
+                >
+                  <RefreshCw className={`h-4 w-4 mr-2 flex-shrink-0 ${isLoading ? 'animate-spin' : ''}`} />
+                  <span className="truncate">Refresh</span>
                 </Button>
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={handleCompare}
                   disabled={selectedRunIds.size < 2}
+                  className="flex-1 min-w-0"
                 >
-                  <GitCompare className="h-4 w-4 mr-2" />
-                  Compare ({selectedRunIds.size})
+                  <GitCompare className="h-4 w-4 mr-2 flex-shrink-0" />
+                  <span className="truncate">Compare ({selectedRunIds.size})</span>
                 </Button>
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => setShowClearDialog(true)}
                   disabled={runs.length === 0}
+                  className="flex-shrink min-w-0"
                 >
-                  <Trash2 className="h-4 w-4 mr-2" />
-                  Clear
+                  <Trash2 className="h-4 w-4 mr-2 flex-shrink-0" />
+                  <span className="truncate">Clear</span>
                 </Button>
               </div>
             </div>
@@ -229,7 +223,6 @@ export function RunHistory({ onCompareRuns, onRerunWithConfig, className }: RunH
               </ScrollArea>
             )}
           </CardContent>
-        )}
       </Card>
 
       {/* Clear Confirmation Dialog */}

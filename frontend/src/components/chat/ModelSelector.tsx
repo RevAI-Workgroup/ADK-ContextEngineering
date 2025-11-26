@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { Bot } from 'lucide-react'
 import {
   Select,
@@ -15,6 +15,7 @@ export function ModelSelector() {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const { selectedModel, setSelectedModel, clearChat } = useChatContext()
+  const hasInitialized = useRef(false)
 
   useEffect(() => {
     const fetchModels = async () => {
@@ -24,9 +25,19 @@ export function ModelSelector() {
         const data = await modelsService.getModels()
         setModels(data)
         
-        // Auto-select the first model if none is selected
-        if (data.length > 0 && !selectedModel) {
-          setSelectedModel(data[0].name)
+        // Auto-select model if none is selected and we haven't initialized yet
+        if (data.length > 0 && !hasInitialized.current) {
+          // Check current selectedModel state at the time of model fetch
+          setSelectedModel((currentModel) => {
+            // Only set default if no model is currently selected
+            if (!currentModel) {
+              // Prefer "qwen3:0.6b" if available, otherwise select the first model
+              const preferredModel = data.find(model => model.name === 'qwen3:0.6b')
+              return preferredModel ? preferredModel.name : data[0].name
+            }
+            return currentModel
+          })
+          hasInitialized.current = true
         }
       } catch (err) {
         console.error('Error fetching models:', err)
@@ -37,6 +48,7 @@ export function ModelSelector() {
     }
 
     fetchModels()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const handleValueChange = (value: string) => {

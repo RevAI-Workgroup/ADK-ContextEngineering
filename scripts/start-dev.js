@@ -7,6 +7,7 @@
  */
 
 const { spawn } = require('child_process');
+const http = require('http');
 const path = require('path');
 const os = require('os');
 
@@ -31,25 +32,132 @@ function log(prefix, message, color = colors.reset) {
   console.log(`${color}${colors.bright}[${prefix}]${colors.reset} ${message}`);
 }
 
+/**
+ * Check if backend is ready by polling the /health endpoint
+ * @param {number} maxAttempts - Maximum number of attempts
+ * @param {number} intervalMs - Interval between attempts in milliseconds
+ * @returns {Promise<boolean>} - True if backend is ready
+ */
+function checkBackendHealth(maxAttempts = 30, intervalMs = 1000) {
+  return new Promise((resolve) => {
+    let attempts = 0;
+    let resolved = false;
+    let pendingTimeouts = [];
+    let currentRequest = null;
+    
+    const cleanup = () => {
+      // Clear all pending timeouts
+      pendingTimeouts.forEach(timeout => clearTimeout(timeout));
+      pendingTimeouts = [];
+      
+      // Abort current request if it exists
+      if (currentRequest) {
+        currentRequest.destroy();
+        currentRequest = null;
+      }
+    };
+    
+    const checkHealth = () => {
+      // Stop if already resolved
+      if (resolved) {
+        return;
+      }
+      
+      attempts++;
+      
+      const req = http.get('http://localhost:8000/health', (res) => {
+        // Stop if already resolved
+        if (resolved) {
+          req.destroy();
+          return;
+        }
+        
+        if (res.statusCode === 200) {
+          resolved = true;
+          log('BACKEND', 'Health check passed - backend is ready!', colors.green);
+          cleanup();
+          resolve(true);
+        } else {
+          if (attempts < maxAttempts) {
+            const timeout = setTimeout(checkHealth, intervalMs);
+            pendingTimeouts.push(timeout);
+          } else {
+            resolved = true;
+            log('BACKEND', 'Health check failed - backend did not become ready in time', colors.yellow);
+            cleanup();
+            resolve(false);
+          }
+        }
+      });
+      
+      currentRequest = req;
+      
+      req.on('error', () => {
+        // Stop if already resolved
+        if (resolved) {
+          return;
+        }
+        
+        if (attempts < maxAttempts) {
+          // Backend not ready yet, try again
+          const timeout = setTimeout(checkHealth, intervalMs);
+          pendingTimeouts.push(timeout);
+        } else {
+          resolved = true;
+          log('BACKEND', 'Health check failed - backend did not become ready in time', colors.yellow);
+          cleanup();
+          resolve(false);
+        }
+      });
+      
+      req.setTimeout(500, () => {
+        req.destroy();
+        currentRequest = null;
+        
+        // Stop if already resolved
+        if (resolved) {
+          return;
+        }
+        
+        if (attempts < maxAttempts) {
+          const timeout = setTimeout(checkHealth, intervalMs);
+          pendingTimeouts.push(timeout);
+        } else {
+          resolved = true;
+          log('BACKEND', 'Health check failed - backend did not become ready in time', colors.yellow);
+          cleanup();
+          resolve(false);
+        }
+      });
+    };
+    
+    // Start checking after a short delay to give backend time to start
+    const initialTimeout = setTimeout(checkHealth, 2000);
+    pendingTimeouts.push(initialTimeout);
+  });
+}
+
 function startBackend() {
   return new Promise((resolve, reject) => {
     log('BACKEND', 'Starting FastAPI server...', colors.blue);
 
     let backendProcess;
     let settled = false;
-    let startupTimer;
     
     if (isWindows) {
       // Windows: Use cmd to run activation and uvicorn
-      backendProcess = spawn('cmd', ['/c', `venv\\Scripts\\activate && set PYTHONPATH=${rootDir} && uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000`], {
+      // IMPORTANT: Use 'call' before activate.bat to ensure the command chain continues
+      // Without 'call', the && chain breaks after the batch file executes
+      // Set CHROMA_TELEMETRY_ENABLED=false to prevent ChromaDB telemetry warning
+      backendProcess = spawn('cmd', ['/c', `call venv\\Scripts\\activate.bat && set "PYTHONPATH=${rootDir}" && set "CHROMA_TELEMETRY_ENABLED=false" && uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000`], {
         cwd: rootDir,
-        shell: true,
         stdio: 'pipe'
       });
     } else {
       // Unix (macOS/Linux): Use bash to source activation and run uvicorn
       // Match start-dev.sh: export PYTHONPATH="${PYTHONPATH}:$(pwd)"
-      backendProcess = spawn('bash', ['-c', `source venv/bin/activate && export PYTHONPATH="$PYTHONPATH:${rootDir}" && uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000`], {
+      // Set CHROMA_TELEMETRY_ENABLED=false to prevent ChromaDB telemetry warning
+      backendProcess = spawn('bash', ['-c', `source venv/bin/activate && export PYTHONPATH="$PYTHONPATH:${rootDir}" && export CHROMA_TELEMETRY_ENABLED=false && uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000`], {
         cwd: rootDir,
         stdio: 'pipe'
       });
@@ -78,7 +186,6 @@ function startBackend() {
     backendProcess.on('error', (error) => {
       if (!settled) {
         settled = true;
-        clearTimeout(startupTimer);
         log('BACKEND', `Error: ${error.message}`, colors.red);
         reject(error);
       }
@@ -89,19 +196,26 @@ function startBackend() {
         log('BACKEND', `Exited with code ${code}`, colors.red);
         if (!settled) {
           settled = true;
-          clearTimeout(startupTimer);
           reject(new Error(`Backend process exited with code ${code}`));
         }
       }
     });
 
-    // Give backend a moment to start
-    startupTimer = setTimeout(() => {
+    // Wait for backend to be ready via health check
+    log('BACKEND', 'Waiting for backend to be ready...', colors.cyan);
+    checkBackendHealth().then((isReady) => {
       if (!settled) {
         settled = true;
-        resolve(backendProcess);
+        if (isReady) {
+          resolve(backendProcess);
+        } else {
+          // Backend started but health check failed - still resolve to allow frontend to start
+          // The user can manually reload if needed
+          log('BACKEND', 'Proceeding with frontend startup despite health check timeout', colors.yellow);
+          resolve(backendProcess);
+        }
       }
-    }, 1000);
+    });
   });
 }
 
@@ -202,9 +316,9 @@ process.on('exit', cleanup);
 
 // Main execution
 async function main() {
-  console.log(`\n${colors.cyan}${colors.bright}╔═══════════════════════════════════════════╗${colors.reset}`);
+  console.log(`\n${colors.cyan}${colors.bright}╔══════════════════════════════════════════╗${colors.reset}`);
   console.log(`${colors.cyan}${colors.bright}║   ADK Context Engineering - Dev Server   ║${colors.reset}`);
-  console.log(`${colors.cyan}${colors.bright}╚═══════════════════════════════════════════╝${colors.reset}\n`);
+  console.log(`${colors.cyan}${colors.bright}╚══════════════════════════════════════════╝${colors.reset}\n`);
   
   log('SYSTEM', `Platform: ${os.platform()} (${os.arch()})`, colors.cyan);
   log('SYSTEM', `Node.js: ${process.version}`, colors.cyan);
@@ -227,7 +341,6 @@ async function main() {
 
     // Check if workspace dependencies are installed
     const nodeModulesPath = path.join(rootDir, 'node_modules');
-    const frontendNodeModulesPath = path.join(rootDir, 'frontend', 'node_modules');
 
     if (!fs.existsSync(nodeModulesPath)) {
       log('ERROR', 'Workspace dependencies not found!', colors.red);
@@ -235,39 +348,51 @@ async function main() {
       log('ERROR', '(Run from project root, not from frontend directory)', colors.red);
       process.exit(1);
     }
-
-    // Warn if frontend has its own node_modules (incorrect workspace setup)
-    if (fs.existsSync(frontendNodeModulesPath)) {
-      log('WARNING', 'Frontend has its own node_modules directory!', colors.yellow);
-      log('WARNING', 'This may indicate incorrect workspace setup.', colors.yellow);
-      const cleanupCmd = isWindows
-        ? 'rmdir /s /q frontend\\node_modules && pnpm install'
-        : 'rm -rf frontend/node_modules && pnpm install';
-      log('WARNING', `Consider running: ${cleanupCmd}`, colors.yellow);
-    }
+    // Note: In a pnpm workspace, frontend/node_modules is expected to exist
+    // (pnpm creates symlinks there). This is normal behavior.
 
     // Initialize Vector Store (if not already initialized)
     log('VECTOR STORE', 'Checking ChromaDB initialization...', colors.cyan);
     try {
+      // Set PYTHONPATH and disable ChromaDB telemetry to prevent warning messages
+      // On Windows: Use 'call' before activate.bat to ensure command chain continues
       const initCmd = isWindows
-        ? `venv\\Scripts\\activate && python scripts\\init_vector_store.py`
-        : `source venv/bin/activate && python3 scripts/init_vector_store.py`;
+        ? `call venv\\Scripts\\activate.bat && set "PYTHONPATH=${rootDir}" && set "CHROMA_TELEMETRY_ENABLED=false" && python scripts\\init_vector_store.py`
+        : `source venv/bin/activate && export PYTHONPATH="$PYTHONPATH:${rootDir}" && export CHROMA_TELEMETRY_ENABLED=false && python3 scripts/init_vector_store.py`;
       
       const shell = isWindows ? 'cmd' : 'bash';
       const shellArgs = isWindows ? ['/c', initCmd] : ['-c', initCmd];
       
       const initProcess = spawn(shell, shellArgs, {
         cwd: rootDir,
-        stdio: 'pipe',
-        shell: true
+        stdio: 'pipe'
+      });
+
+      // Capture output from the init process
+      initProcess.stdout.on('data', (data) => {
+        const output = data.toString().trim();
+        if (output) {
+          output.split('\n').forEach(line => {
+            log('VECTOR STORE', line, colors.cyan);
+          });
+        }
+      });
+
+      initProcess.stderr.on('data', (data) => {
+        const output = data.toString().trim();
+        if (output) {
+          output.split('\n').forEach(line => {
+            log('VECTOR STORE', line, colors.yellow);
+          });
+        }
       });
 
       await new Promise((resolve) => {
         initProcess.on('close', (code) => {
           if (code === 0) {
-            log('VECTOR STORE', 'Vector store initialized successfully', colors.cyan);
+            log('VECTOR STORE', 'Vector store initialization complete', colors.cyan);
           } else {
-            log('WARNING', 'Vector store initialization failed (non-critical)', colors.yellow);
+            log('WARNING', `Vector store initialization exited with code ${code} (non-critical)`, colors.yellow);
             const activateCmd = isWindows 
               ? 'venv\\Scripts\\activate && python scripts\\init_vector_store.py'
               : 'source venv/bin/activate && python3 scripts/init_vector_store.py';
@@ -281,17 +406,21 @@ async function main() {
       log('WARNING', `Error: ${error.message}`, colors.yellow);
     }
 
-    // Start both servers
+    // Start backend first and wait for it to be ready
+    log('SYSTEM', 'Starting backend server...', colors.cyan);
     await startBackend();
+    
+    // Only start frontend after backend is ready
+    log('SYSTEM', 'Backend is ready, starting frontend...', colors.cyan);
     await startFrontend();
 
-    console.log(`\n${colors.cyan}${colors.bright}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${colors.reset}`);
+    console.log(`\n${colors.cyan}${colors.bright}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${colors.reset}`);
     log('SYSTEM', '✨ Development servers are running!', colors.cyan);
-    console.log(`${colors.cyan}${colors.bright}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${colors.reset}`);
+    console.log(`${colors.cyan}${colors.bright}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${colors.reset}`);
     log('BACKEND', 'http://localhost:8000 (API)', colors.blue);
     log('BACKEND', 'http://localhost:8000/docs (API Docs)', colors.blue);
     log('FRONTEND', 'http://localhost:5173 (UI)', colors.green);
-    console.log(`${colors.cyan}${colors.bright}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${colors.reset}`);
+    console.log(`${colors.cyan}${colors.bright}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${colors.reset}`);
     log('SYSTEM', 'Press Ctrl+C to stop all servers\n', colors.yellow);
 
   } catch (error) {

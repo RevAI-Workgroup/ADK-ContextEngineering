@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card'
 import { Button } from '../components/ui/button'
-import { Brain, MessageSquare, BarChart3, ArrowRight } from 'lucide-react'
+import { Brain, MessageSquare, Server, ArrowRight } from 'lucide-react'
 
 export function Home() {
   return (
@@ -55,17 +55,17 @@ export function Home() {
 
         <Card>
           <CardHeader>
-            <BarChart3 className="h-12 w-12 text-primary mb-4" />
-            <CardTitle>Metrics Dashboard</CardTitle>
+            <Server className="h-12 w-12 text-primary mb-4" />
+            <CardTitle>Locally Hosted LLMs</CardTitle>
             <CardDescription>
-              Compare runs with different configurations to measure technique impact
+              Powered by Ollama with complete privacy and offline capability
             </CardDescription>
           </CardHeader>
           <CardContent>
             <ul className="space-y-2 text-sm">
-              <li>✓ Run comparison analytics</li>
-              <li>✓ Technique impact visualization</li>
-              <li>✓ Configuration-based filtering</li>
+              <li>✓ 100% local processing</li>
+              <li>✓ No data sent to external APIs</li>
+              <li>✓ Full control over models</li>
             </ul>
           </CardContent>
         </Card>
@@ -108,13 +108,13 @@ export function Home() {
             <PhaseItem
               phase="Phase 3"
               title="RAG Module Implementation"
-              status="upcoming"
+              status="complete"
               description="Vector database and retrieval-augmented generation"
             />
             <PhaseItem
               phase="Phase 4"
               title="Compression & Caching Modules"
-              status="upcoming"
+              status="current"
               description="Context compression and semantic caching"
             />
             <PhaseItem

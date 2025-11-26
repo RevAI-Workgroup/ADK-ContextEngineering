@@ -21,6 +21,8 @@ from google.adk import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
 from src.core.config import get_config
+# Direct LiteLLM import for accessing reasoning_content that ADK doesn't expose
+import litellm
 from src.core.tracing import trace_span, record_metric, get_tracer
 from src.core.context_config import ContextEngineeringConfig
 from src.core.modular_pipeline import ContextPipeline
@@ -160,8 +162,11 @@ class ADKAgentWrapper:
         Returns:
             True if the model is known to stream reasoning content, otherwise False.
         """
+        # Enable reasoning extraction for all models by default
+        # This ensures that if the model outputs <think> tags (which we now force via INSTRUCTION),
+        # they will be properly parsed and displayed in the frontend
         if not model:
-            return False
+            return True  # Default models use reasoning format
 
         model_lower = model.lower()
         reasoning_keywords = [
@@ -173,81 +178,122 @@ class ADKAgentWrapper:
             "gpt-o1",
             "reasoning",
             "think",
+            "qwen",   # Added: qwen models are instructed to use <think> tags
+            "llama",  # Added: llama models are instructed to use <think> tags
+            "mistral",
+            "phi",
+            "gemma",
         ]
         return any(keyword in model_lower for keyword in reasoning_keywords)
 
     def _segment_stream_text(
-        self, text: str, in_reasoning_phase: bool, is_reasoning_model: bool
-    ) -> Tuple[List[Tuple[str, str]], bool]:
+        self, text: str, in_reasoning_phase: bool, is_reasoning_model: bool, in_explicit_think_tag: bool = False
+    ) -> Tuple[List[Tuple[str, str]], bool, bool]:
         """
         Split streamed text into reasoning and response segments.
+
+        This method detects and separates reasoning content (inside <think> tags or similar markers)
+        from final response content. It handles both explicit XML-style tags and natural language
+        markers like "Answer:" or "Final Response:".
 
         Args:
             text: The raw text emitted by the model for this event.
             in_reasoning_phase: Whether the previous segment indicated we are inside a reasoning block.
             is_reasoning_model: Whether the current model is expected to emit reasoning traces.
+            in_explicit_think_tag: Whether we're inside an explicit <think> tag (vs implicit reasoning).
 
         Returns:
             A tuple containing:
                 - Ordered list of (segment_type, segment_text) tuples where segment_type is
                   either "reasoning" or "response".
                 - Updated in_reasoning_phase flag reflecting the end state after processing ``text``.
+                - Updated in_explicit_think_tag flag.
         """
         if not text:
-            return [], in_reasoning_phase
+            return [], in_reasoning_phase, in_explicit_think_tag
 
         # If the model is not reasoning-capable and we're not already in a reasoning block,
         # treat the entire segment as part of the final response.
         if not is_reasoning_model and not in_reasoning_phase:
-            return [("response", text)], in_reasoning_phase
+            logger.debug(f"[Segment] Non-reasoning model, treating as response: {text[:50]}...")
+            return [("response", text)], in_reasoning_phase, in_explicit_think_tag
 
         remaining = text
         segments: List[Tuple[str, str]] = []
 
+        # Patterns for detecting reasoning blocks
+        # Supports: <think>, <thinking>, <analysis>, <reasoning>, <thought>
         open_pattern = re.compile(
             r"<\s*(think|thinking|analysis|reasoning|thought)\s*>", re.IGNORECASE
         )
         close_pattern = re.compile(
             r"<\s*/\s*(think|thinking|analysis|reasoning|thought)\s*>", re.IGNORECASE
         )
+        # Pattern to detect the start of a final answer
         answer_pattern = re.compile(
-            r"(?:^|\n+)\s*(final answer|answer|final response|response|solution)\s*:?",
+            r"(?:^|\n+)\s*(final answer|answer|final response|response|solution|conclusion)\s*:?",
             re.IGNORECASE,
         )
+        # Pattern for explicit reasoning labels at the start
         reasoning_label_pattern = re.compile(
-            r"^\s*(analysis|reasoning|thought|thinking|chain of thought|deliberation)\s*:?",
+            r"^\s*(analysis|reasoning|thought|thinking|chain of thought|deliberation|let me think|i need to)\s*:?",
             re.IGNORECASE,
         )
 
-        while remaining:
+        logger.debug(f"[Segment] Processing text (len={len(text)}, in_reasoning={in_reasoning_phase}, explicit_tag={in_explicit_think_tag}): {text[:100]}...")
+
+        iteration_count = 0
+        max_iterations = 100  # Safety guard
+
+        while remaining and iteration_count < max_iterations:
+            iteration_count += 1
+
             if in_reasoning_phase:
+                # We're inside a reasoning block, look for the closing tag
                 close_match = close_pattern.search(remaining)
                 if close_match:
                     segment_text = remaining[: close_match.start()]
                     if segment_text:
+                        logger.debug(f"[Segment] Found reasoning content before close tag: {len(segment_text)} chars")
                         segments.append(("reasoning", segment_text))
                     remaining = remaining[close_match.end() :]
                     in_reasoning_phase = False
+                    in_explicit_think_tag = False  # Exited explicit tag
+                    logger.debug(f"[Segment] Closed reasoning block, remaining: {len(remaining)} chars")
                     continue
 
-                answer_match = answer_pattern.search(remaining)
-                if answer_match:
-                    if answer_match.start() > 0:
-                        reasoning_part = remaining[: answer_match.start()]
-                        if reasoning_part.strip():
-                            segments.append(("reasoning", reasoning_part))
-                    remaining = remaining[answer_match.start() :]
-                    in_reasoning_phase = False
-                    continue
-                else:
-                    if remaining:
-                        segments.append(("reasoning", remaining))
-                    remaining = ""
-                    break
+                # ONLY check for answer markers if we're NOT inside explicit <think> tags
+                # This prevents truncation when model writes "Answer:" inside its thinking
+                if not in_explicit_think_tag:
+                    answer_match = answer_pattern.search(remaining)
+                    if answer_match:
+                        if answer_match.start() > 0:
+                            reasoning_part = remaining[: answer_match.start()]
+                            if reasoning_part.strip():
+                                logger.debug(f"[Segment] Reasoning before answer marker: {len(reasoning_part)} chars")
+                                segments.append(("reasoning", reasoning_part))
+                        remaining = remaining[answer_match.start() :]
+                        in_reasoning_phase = False
+                        logger.debug(f"[Segment] Found answer marker, exiting implicit reasoning phase")
+                        continue
+                
+                # No close tag found (or answer marker when in explicit tag), all remaining text is reasoning
+                if remaining:
+                    logger.debug(f"[Segment] All remaining is reasoning: {len(remaining)} chars")
+                    segments.append(("reasoning", remaining))
+                remaining = ""
+                break
             else:
-                # Handle explicit reasoning labels (e.g., "Reasoning:", "Analysis:")
+                # We're not in a reasoning block
+
+                # Check for explicit opening reasoning tag
+                open_match = open_pattern.search(remaining)
+                
+                # Check for reasoning label at the start (e.g., "Reasoning:", "Let me think")
                 reasoning_label_match = reasoning_label_pattern.match(remaining)
+                
                 if reasoning_label_match:
+                    # Handle explicit reasoning labels
                     answer_match = answer_pattern.search(
                         remaining, reasoning_label_match.end()
                     )
@@ -260,51 +306,67 @@ class ADKAgentWrapper:
                         response_part = remaining[split_index:]
 
                         if reasoning_part.strip():
+                            logger.debug(f"[Segment] Reasoning label block: {len(reasoning_part)} chars")
                             segments.append(("reasoning", reasoning_part))
 
                         if response_part:
+                            logger.debug(f"[Segment] Response after label block: {len(response_part)} chars")
                             segments.append(("response", response_part))
 
                         remaining = ""
                         break
 
                     # No answer yet; treat the remainder as reasoning and keep phase active
+                    # This is IMPLICIT reasoning (via label), not explicit <think> tag
+                    logger.debug(f"[Segment] Reasoning label with no answer marker, continuing as implicit reasoning")
                     segments.append(("reasoning", remaining))
                     remaining = ""
                     in_reasoning_phase = True
+                    in_explicit_think_tag = False  # Implicit reasoning
                     break
 
-                open_match = open_pattern.search(remaining)
                 if open_match:
+                    # Found an opening reasoning tag
                     before_text = remaining[: open_match.start()]
                     if before_text:
+                        logger.debug(f"[Segment] Response before think tag: {len(before_text)} chars")
                         segments.append(("response", before_text))
                     remaining = remaining[open_match.end() :]
                     in_reasoning_phase = True
+                    in_explicit_think_tag = True  # EXPLICIT <think> tag
+                    logger.debug(f"[Segment] Entered reasoning phase via <think> tag (explicit)")
                     continue
 
-                # Fallback heuristics: many reasoning models emit "Answer:" style separators.
+                # Fallback heuristics: many reasoning models emit "Answer:" style separators
                 answer_match = answer_pattern.search(remaining)
                 if answer_match and answer_match.start() > 0:
+                    # Text before "Answer:" might be implicit reasoning
                     reasoning_part = remaining[: answer_match.start()]
                     response_part = remaining[answer_match.start() :]
 
                     if reasoning_part.strip():
+                        logger.debug(f"[Segment] Implicit reasoning before answer: {len(reasoning_part)} chars")
                         segments.append(("reasoning", reasoning_part))
 
                     if response_part:
+                        logger.debug(f"[Segment] Response after answer marker: {len(response_part)} chars")
                         segments.append(("response", response_part))
 
                     remaining = ""
                     break
 
-                # No reasoning markers detected — treat the remainder as response text.
+                # No reasoning markers detected — treat the remainder as response text
                 if remaining:
+                    logger.debug(f"[Segment] No markers, treating as response: {len(remaining)} chars")
                     segments.append(("response", remaining))
                 remaining = ""
                 break
 
-        return segments, in_reasoning_phase
+        if iteration_count >= max_iterations:
+            logger.warning(f"[Segment] Max iterations reached, possible infinite loop. Remaining: {remaining[:100]}")
+
+        logger.debug(f"[Segment] Result: {len(segments)} segments, still_in_reasoning={in_reasoning_phase}, explicit_tag={in_explicit_think_tag}")
+        return segments, in_reasoning_phase, in_explicit_think_tag
 
     def _get_or_create_runner(
         self,
@@ -365,6 +427,7 @@ class ADKAgentWrapper:
         )
 
         # Build custom instruction based on configuration
+        # INSTRUCTION already includes the <think> tag requirement
         custom_instruction = INSTRUCTION
 
         # Add RAG capability to description and enhanced instructions if enabled
@@ -372,6 +435,7 @@ class ADKAgentWrapper:
             agent_description += ", and searching the knowledge base for information"
 
             # Enhance instructions with RAG-specific guidance
+            # Note: INSTRUCTION already contains the critical <think> tag formatting requirement
             custom_instruction = (
                 f"{INSTRUCTION}\n\n"
                 "⚠️ IMPORTANT - Knowledge Base Search:\n"
@@ -381,7 +445,8 @@ class ADKAgentWrapper:
                 "- Use it when users ask 'what', 'how', 'why', 'explain', or 'tell me about' anything\n"
                 "- Even for seemingly simple questions, the knowledge base might have relevant details\n"
                 "- If search returns no results, then you can say you don't have information\n\n"
-                "Strategy: When in doubt, search the knowledge base first!"
+                "Strategy: When in doubt, search the knowledge base first!\n\n"
+                "REMINDER: Always start your response with <think>reasoning</think> tags!"
             )
 
         agent_description += "."
@@ -392,6 +457,7 @@ class ADKAgentWrapper:
                 model=f"ollama_chat/{model}" if model else "ollama_chat/qwen3:4b",
                 temperature=temperature,
                 max_tokens=max_tokens,
+                stream=True,
             ),
             description=agent_description,
             instruction=custom_instruction,
@@ -511,6 +577,7 @@ class ADKAgentWrapper:
 
                 # Process events to extract response
                 response_text = ""
+                reasoning_text = ""  # For ADK 'thought' attribute
                 tool_calls = []
                 thinking_steps = []
 
@@ -518,19 +585,82 @@ class ADKAgentWrapper:
                     event_type = type(event).__name__
                     logger.debug(f"Processing event {idx}: {event_type}")
 
-                    # Extract text from content
+                    # Extract content from event
                     if hasattr(event, "content") and event.content:
                         if hasattr(event.content, "parts"):
                             for part in event.content.parts:
+                                # CRITICAL: Check for 'thought' attribute first
+                                # ADK/Gemini models store reasoning in part.thought, separate from part.text
+                                if hasattr(part, "thought") and part.thought:
+                                    thought_text = part.thought
+                                    logger.info(f"[Sync] Thought/reasoning detected ({len(thought_text)} chars): {thought_text[:100]}...")
+                                    reasoning_text += thought_text
+                                
+                                # Check for function call (tool usage)
+                                if hasattr(part, "function_call") and part.function_call:
+                                    func_call = part.function_call
+                                    tool_name = getattr(func_call, 'name', 'unknown_tool')
+                                    
+                                    # Extract function arguments if available
+                                    tool_args = {}
+                                    if hasattr(func_call, "args"):
+                                        try:
+                                            if isinstance(func_call.args, dict):
+                                                tool_args = func_call.args
+                                            elif isinstance(func_call.args, str):
+                                                import json
+                                                tool_args = json.loads(func_call.args)
+                                        except Exception as e:
+                                            logger.warning(f"Could not parse tool args: {e}")
+                                    
+                                    tool_call_data = {
+                                        "name": tool_name,
+                                        "description": f"Tool invocation: {tool_name}",
+                                        "parameters": tool_args if tool_args else None,
+                                        "timestamp": datetime.utcnow().isoformat(),
+                                    }
+                                    tool_calls.append(tool_call_data)
+                                    logger.info(f"[Sync] Tool call detected: {tool_name} with args: {tool_args}")
+                                
+                                # Check for function response (tool result)
+                                if hasattr(part, "function_response") and part.function_response:
+                                    func_response = part.function_response
+                                    response_name = getattr(func_response, 'name', 'unknown')
+                                    response_result = getattr(func_response, 'response', None)
+                                    if response_result is None:
+                                        response_result = getattr(func_response, 'result', str(func_response))
+                                    
+                                    # Update the corresponding tool call with the result
+                                    for tc in tool_calls:
+                                        if tc['name'] == response_name and tc.get('result') is None:
+                                            tc['result'] = response_result
+                                            logger.info(f"[Sync] Tool result added for: {response_name}")
+                                            break
+                                
+                                # Extract text content (accumulate rather than overwrite)
                                 if hasattr(part, "text") and part.text:
                                     text = part.text
                                     logger.info(
                                         f"Extracted text from event {idx}: {text[:100]}"
                                     )
-                                    response_text = text
+                                    # Check for embedded <think> tags in text
+                                    if "<think>" in text.lower() or "</think>" in text.lower():
+                                        # Extract reasoning from <think> tags
+                                        think_pattern = re.compile(r'<think>(.*?)</think>', re.DOTALL | re.IGNORECASE)
+                                        matches = think_pattern.findall(text)
+                                        for match in matches:
+                                            if match.strip():
+                                                reasoning_text += match.strip() + "\n"
+                                                logger.info(f"[Sync] Extracted embedded reasoning ({len(match)} chars)")
+                                        # Remove think tags from response text
+                                        clean_text = think_pattern.sub('', text).strip()
+                                        if clean_text:
+                                            response_text = clean_text
+                                    else:
+                                        response_text = text
 
-                    # Look for tool call information
-                    if "tool" in event_type.lower():
+                    # Legacy fallback: Look for tool call in event type name
+                    if "tool" in event_type.lower() and not any(tc for tc in tool_calls if tc.get('name') != event_type):
                         tool_calls.append(
                             {
                                 "name": event_type,
@@ -538,6 +668,11 @@ class ADKAgentWrapper:
                                 "timestamp": datetime.utcnow().isoformat(),
                             }
                         )
+                
+                # Convert reasoning to thinking_steps if we captured any
+                if reasoning_text.strip():
+                    thinking_steps = [reasoning_text.strip()]
+                    logger.info(f"[Sync] Total reasoning captured: {len(reasoning_text)} chars")
 
                 if response_text:
                     logger.info(f"Agent response received: {response_text[:200]}...")
@@ -766,10 +901,11 @@ class ADKAgentWrapper:
 
             current_reasoning = ""
             current_response = ""
+            tool_calls = []  # Track tool calls during streaming
             in_reasoning_phase = False
-            stream_delay_seconds = (
-                0.01  # 10ms delay to mimic incremental streaming cadence
-            )
+            in_explicit_think_tag = False  # Track if we're inside explicit <think> tags
+            # With stream=True in LiteLLM, we get real token-level streaming from Ollama
+            # No need for artificial delays
 
             # Ensure session exists before running agent
             # Use the same session creation logic as _run_agent_async
@@ -826,6 +962,9 @@ class ADKAgentWrapper:
             last_event_time = asyncio.get_event_loop().time()
             EVENT_TIMEOUT = 120.0  # 120 seconds max between events
 
+            # Initialize Smart Buffer for tag fragmentation prevention
+            stream_buffer = ""
+
             try:
                 agent_stream = runner.run_async(
                     user_id=user_id, session_id=session_id, new_message=content
@@ -844,100 +983,164 @@ class ADKAgentWrapper:
                         if hasattr(event.content, "parts"):
                             for part_idx, part in enumerate(event.content.parts):
                                 part_type = type(part).__name__
-                                logger.debug(
-                                    f"[Token Streaming] Event {event_count}, Part {part_idx}: {part_type}"
+                                
+                                # Log all relevant Part attributes for debugging
+                                part_text = getattr(part, 'text', None)
+                                part_thought = getattr(part, 'thought', None)
+                                part_func_call = getattr(part, 'function_call', None)
+                                part_func_response = getattr(part, 'function_response', None)
+                                
+                                logger.info(
+                                    f"[Token Streaming] Event {event_count}, Part {part_idx}: "
+                                    f"text={repr(part_text[:50] if part_text else None)}, "
+                                    f"thought={repr(part_thought[:50] if part_thought else None) if part_thought else None}, "
+                                    f"func_call={bool(part_func_call)}, func_response={bool(part_func_response)}"
                                 )
 
-                                # Extract text and stream as tokens
+                                # CRITICAL: Check for 'thought' attribute first
+                                # ADK/Gemini models store reasoning in part.thought, separate from part.text
+                                # This is how models like Qwen3 expose their internal thinking process
+                                if hasattr(part, "thought") and part.thought:
+                                    try:
+                                        thought_text = part.thought
+                                        logger.info(
+                                            f"[Token Streaming] 🧠 THOUGHT detected (length={len(thought_text)}): "
+                                            f"{repr(thought_text[:100])}{'...' if len(thought_text) > 100 else ''}"
+                                        )
+                                        
+                                        # Stream thought content directly as reasoning
+                                        current_reasoning += thought_text
+                                        yield {
+                                            "type": "reasoning_token",
+                                            "data": {
+                                                "token": thought_text,
+                                                "cumulative_reasoning": current_reasoning,
+                                            },
+                                        }
+                                        logger.info(
+                                            f"[Token Streaming] Cumulative reasoning (from thought) now {len(current_reasoning)} chars"
+                                        )
+                                        await asyncio.sleep(0)
+                                    except Exception as thought_error:
+                                        logger.error(
+                                            f"Error processing thought part: {thought_error}",
+                                            exc_info=True,
+                                        )
+
+                                # Extract text and stream chunks as they arrive
+                                # With stream=True, LiteLLM emits text in real-time chunks from Ollama
                                 if hasattr(part, "text") and part.text:
                                     try:
                                         text = part.text
                                         logger.info(
-                                            f"[Token Streaming] Streaming text: {text[:100]}... (length: {len(text)})"
+                                            f"[Token Streaming] Received chunk (length={len(text)}): "
+                                            f"{repr(text[:100])}{'...' if len(text) > 100 else ''}"
                                         )
 
-                                        segments, in_reasoning_phase = (
-                                            self._segment_stream_text(
-                                                text=text,
-                                                in_reasoning_phase=in_reasoning_phase,
-                                                is_reasoning_model=is_reasoning_model,
-                                            )
-                                        )
+                                        # Append to stream buffer
+                                        stream_buffer += text
 
-                                        if not segments:
-                                            logger.debug(
-                                                "[Token Streaming] No streamable text segments detected"
+                                        # Check if buffer ends with a partial tag
+                                        # Patterns to detect incomplete tags:
+                                        # - '<' at end (start of any tag)
+                                        # - '</' at end (start of closing tag)
+                                        # - '<think' or '</think' without '>' (incomplete tag)
+                                        # - Any '<' followed by characters but no '>' at the end
+                                        partial_tag_patterns = [
+                                            r'<\s*$',  # Just '<' or '< ' at end
+                                            r'<\s*/\s*$',  # Just '</' at end
+                                            r'<\s*[a-zA-Z][^>]{0,30}$',  # Opening tag started but not closed
+                                            r'<\s*/\s*[a-zA-Z][^>]{0,30}$',  # Closing tag started but not closed
+                                        ]
+                                        
+                                        partial_tag_match = None
+                                        for pattern in partial_tag_patterns:
+                                            match = re.search(pattern, stream_buffer)
+                                            if match:
+                                                partial_tag_match = match
+                                                break
+                                        
+                                        text_to_process = ""
+                                        if partial_tag_match:
+                                            # Split: safe part before the partial tag, and the partial tag itself
+                                            partial_start = partial_tag_match.start()
+                                            safe_to_process = stream_buffer[:partial_start]
+                                            partial_tag = stream_buffer[partial_start:]
+                                            
+                                            logger.info(
+                                                f"[Token Streaming] Partial tag detected: {repr(partial_tag)} "
+                                                f"(holding back {len(partial_tag)} chars, safe={len(safe_to_process)} chars)"
                                             )
-                                            continue
-
-                                        tokens_streamed_for_part = 0
-
-                                        for segment_index, (
-                                            segment_type,
-                                            segment_text,
-                                        ) in enumerate(segments):
-                                            # Whitespace-preserving tokenization: iterate over runs of whitespace and non-whitespace
-                                            # This preserves all whitespace (spaces, newlines, tabs) unlike split() which collapses them
-                                            tokens = re.findall(
-                                                r"\S+|\s+", segment_text
+                                            
+                                            text_to_process = safe_to_process
+                                            stream_buffer = partial_tag  # Keep partial tag for next iteration
+                                        else:
+                                            # No partial tag - process everything
+                                            text_to_process = stream_buffer
+                                            stream_buffer = ""  # Clear buffer
+                                            logger.debug(f"[Token Streaming] No partial tag, processing all {len(text_to_process)} chars")
+                                        
+                                        # Only process if we have text
+                                        if text_to_process:
+                                            # Segment the text into reasoning and response parts
+                                            segments, in_reasoning_phase, in_explicit_think_tag = (
+                                                self._segment_stream_text(
+                                                    text=text_to_process,
+                                                    in_reasoning_phase=in_reasoning_phase,
+                                                    is_reasoning_model=is_reasoning_model,
+                                                    in_explicit_think_tag=in_explicit_think_tag,
+                                                )
                                             )
-                                            if not tokens:
+
+                                            if not segments:
+                                                logger.debug(
+                                                    "[Token Streaming] No segments detected, skipping"
+                                                )
                                                 continue
 
-                                            logger.debug(
-                                                "[Token Streaming] Segment %s type=%s token_count=%s",
-                                                segment_index + 1,
-                                                segment_type,
-                                                len(tokens),
-                                            )
-
-                                            for token_idx, token in enumerate(tokens):
-                                                try:
-                                                    # Token is the matched substring (whitespace or non-whitespace run)
-                                                    # Append directly without manually adding spaces
-                                                    if segment_type == "reasoning":
-                                                        current_reasoning += token
-                                                        yield {
-                                                            "type": "reasoning_token",
-                                                            "data": {
-                                                                "token": token,
-                                                                "cumulative_reasoning": current_reasoning,
-                                                            },
-                                                        }
-                                                    else:
-                                                        current_response += token
-                                                        yield {
-                                                            "type": "token",
-                                                            "data": {
-                                                                "token": token,
-                                                                "cumulative_response": current_response,
-                                                            },
-                                                        }
-
-                                                    tokens_streamed_for_part += 1
-                                                    # Only delay on non-whitespace tokens to avoid delaying on pure whitespace
-                                                    if token.strip():
-                                                        await asyncio.sleep(
-                                                            stream_delay_seconds
-                                                        )
-                                                except Exception as token_yield_error:
-                                                    logger.error(
-                                                        f"Error yielding token {token_idx}: {token_yield_error}",
-                                                        exc_info=True,
-                                                    )
+                                            # Stream each segment immediately without artificial delays
+                                            for segment_type, segment_text in segments:
+                                                if not segment_text:
                                                     continue
 
-                                        if tokens_streamed_for_part:
-                                            logger.info(
-                                                "[Token Streaming] Streamed %s tokens "
-                                                "(reasoning_chars=%s, response_chars=%s)",
-                                                tokens_streamed_for_part,
-                                                len(current_reasoning),
-                                                len(current_response),
-                                            )
-                                        else:
+                                                logger.info(
+                                                    f"[Token Streaming] YIELDING {segment_type.upper()} segment "
+                                                    f"(len={len(segment_text)}): {repr(segment_text[:80])}{'...' if len(segment_text) > 80 else ''}"
+                                                )
+
+                                                # Stream the chunk as-is (no artificial tokenization)
+                                                if segment_type == "reasoning":
+                                                    current_reasoning += segment_text
+                                                    yield {
+                                                        "type": "reasoning_token",
+                                                        "data": {
+                                                            "token": segment_text,
+                                                            "cumulative_reasoning": current_reasoning,
+                                                        },
+                                                    }
+                                                    logger.debug(
+                                                        f"[Token Streaming] Cumulative reasoning now {len(current_reasoning)} chars"
+                                                    )
+                                                else:
+                                                    current_response += segment_text
+                                                    yield {
+                                                        "type": "token",
+                                                        "data": {
+                                                            "token": segment_text,
+                                                            "cumulative_response": current_response,
+                                                        },
+                                                    }
+                                                    logger.debug(
+                                                        f"[Token Streaming] Cumulative response now {len(current_response)} chars"
+                                                    )
+                                                
+                                                # No artificial delays - stream naturally as chunks arrive
+                                                # Allow other async tasks to run with minimal yield
+                                                await asyncio.sleep(0)
+
                                             logger.debug(
-                                                "[Token Streaming] No tokens emitted for this part"
+                                                f"[Token Streaming] Segment complete "
+                                                f"(reasoning_chars={len(current_reasoning)}, response_chars={len(current_response)})"
                                             )
                                     except Exception as text_processing_error:
                                         logger.error(
@@ -963,15 +1166,107 @@ class ADKAgentWrapper:
                                             if hasattr(func_call, "name")
                                             else "unknown_tool"
                                         )
+                                        
+                                        # Extract function arguments if available
+                                        tool_args = {}
+                                        if hasattr(func_call, "args"):
+                                            try:
+                                                if isinstance(func_call.args, dict):
+                                                    tool_args = func_call.args
+                                                elif isinstance(func_call.args, str):
+                                                    import json
+                                                    tool_args = json.loads(func_call.args)
+                                            except Exception as e:
+                                                logger.warning(f"Could not parse tool args: {e}")
+                                        
+                                        tool_call_data = {
+                                            "name": tool_name,
+                                            "description": f"Tool invocation: {tool_name}",
+                                            "parameters": tool_args if tool_args else None,
+                                            "timestamp": datetime.utcnow().isoformat(),
+                                        }
+                                        tool_calls.append(tool_call_data)
+                                        
                                         logger.info(
-                                            f"[Token Streaming] Tool call detected: {tool_name}"
+                                            f"[Token Streaming] Tool call detected: {tool_name} with args: {tool_args}"
                                         )
+                                        # Emit full tool call data (not just message) for frontend display
                                         yield {
                                             "type": "tool_call",
                                             "data": {
-                                                "message": f"{tool_name}: Called tool"
+                                                "name": tool_name,
+                                                "description": f"Calling tool: {tool_name}",
+                                                "parameters": tool_args if tool_args else None,
+                                                "timestamp": datetime.utcnow().isoformat(),
                                             },
                                         }
+                                
+                                # Check for function response (tool result)
+                                if hasattr(part, "function_response"):
+                                    func_response = part.function_response
+                                    if func_response:
+                                        response_name = getattr(func_response, 'name', 'unknown')
+                                        response_result = getattr(func_response, 'response', None)
+                                        
+                                        # Try to extract result from response
+                                        if response_result is None:
+                                            # Try alternative attribute names
+                                            response_result = getattr(func_response, 'result', None)
+                                            if response_result is None:
+                                                response_result = str(func_response)
+                                        
+                                        logger.info(
+                                            f"[Token Streaming] Tool result received: {response_name} = {str(response_result)[:100]}..."
+                                        )
+                                        
+                                        # Emit tool result event for frontend to update tool call
+                                        yield {
+                                            "type": "tool_result",
+                                            "data": {
+                                                "name": response_name,
+                                                "result": response_result,
+                                                "timestamp": datetime.utcnow().isoformat(),
+                                            },
+                                        }
+
+                # After loop: Process any remaining buffer content
+                if stream_buffer.strip():
+                    logger.info(
+                        f"[Token Streaming] Processing leftover buffer content ({len(stream_buffer)} chars): '{stream_buffer[:50]}...'"
+                    )
+                    segments, in_reasoning_phase, in_explicit_think_tag = (
+                        self._segment_stream_text(
+                            text=stream_buffer,
+                            in_reasoning_phase=in_reasoning_phase,
+                            is_reasoning_model=is_reasoning_model,
+                            in_explicit_think_tag=in_explicit_think_tag,
+                        )
+                    )
+                    
+                    for segment_type, segment_text in segments:
+                        if not segment_text:
+                            continue
+                        
+                        if segment_type == "reasoning":
+                            current_reasoning += segment_text
+                            yield {
+                                "type": "reasoning_token",
+                                "data": {
+                                    "token": segment_text,
+                                    "cumulative_reasoning": current_reasoning,
+                                },
+                            }
+                        else:
+                            current_response += segment_text
+                            yield {
+                                "type": "token",
+                                "data": {
+                                    "token": segment_text,
+                                    "cumulative_response": current_response,
+                                },
+                            }
+                        
+                        await asyncio.sleep(0)
 
                 logger.info(
                     f"[Token Streaming] Completed streaming {event_count} events"
@@ -1052,13 +1347,22 @@ class ADKAgentWrapper:
                 return
 
             # Send completion signal with model info and pipeline metrics/metadata
-            logger.info(
-                f"[Token Streaming] Sending completion signal (model: {resolved_model})"
-            )
             reasoning_length = (
                 len(current_reasoning.strip()) if current_reasoning.strip() else 0
             )
             response_length = len(current_response.strip())
+            
+            logger.info(
+                f"[Token Streaming] COMPLETE - Model: {resolved_model}, "
+                f"Reasoning: {reasoning_length} chars, Response: {response_length} chars, "
+                f"Events processed: {event_count}"
+            )
+            
+            # Log summary of what was extracted
+            if reasoning_length > 0:
+                logger.info(f"[Token Streaming] Reasoning preview: {current_reasoning[:200]}...")
+            else:
+                logger.warning("[Token Streaming] No reasoning content was extracted from the model response")
 
             complete_data = {
                 "model": resolved_model,
@@ -1081,11 +1385,177 @@ class ADKAgentWrapper:
                 complete_data["enabled_techniques"] = enabled_techniques
                 logger.debug(f"Including enabled techniques: {enabled_techniques}")
 
+            # Include tool calls if any were detected
+            if tool_calls:
+                complete_data["tool_calls"] = tool_calls
+                logger.info(f"[Token Streaming] Including {len(tool_calls)} tool call(s) in complete event")
+
             yield {"type": "complete", "data": complete_data}
 
         except Exception as e:
             logger.error(f"Error in token streaming: {e}", exc_info=True)
             yield {"type": "error", "data": {"error": str(e)}}
+
+    async def process_message_stream_litellm(
+        self,
+        message: str,
+        session_id: Optional[str] = None,
+        model: Optional[str] = None,
+        config: Optional[ContextEngineeringConfig] = None,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        Stream tokens using LiteLLM directly to access reasoning_content.
+        
+        This method bypasses ADK's abstraction to get access to LiteLLM's
+        reasoning_content field which contains the model's thinking process
+        from Qwen and other thinking-capable models.
+        
+        Args:
+            message: User's message
+            session_id: Optional session ID
+            model: Optional model name (e.g., "qwen3:8b")
+            config: Optional context engineering configuration
+            
+        Yields:
+            Dictionary events for reasoning_token, token, tool_call, complete, error
+        """
+        resolved_model = model if model else "qwen3:4b"
+        logger.info(
+            f"[LiteLLM Streaming] Processing with model '{resolved_model}': {message[:50]}..."
+        )
+        
+        current_reasoning = ""
+        current_response = ""
+        tool_calls = []  # Track tool calls during streaming
+        
+        try:
+            # Build the full model name for LiteLLM
+            litellm_model = f"ollama_chat/{resolved_model}"
+            
+            # Build system message with our instruction
+            system_message = {"role": "system", "content": INSTRUCTION}
+            
+            # Process pipeline context if config provided
+            enriched_message = message
+            pipeline_metrics = {}
+            if config:
+                pipeline = ContextPipeline(config)
+                pipeline_context = pipeline.process(
+                    query=message,
+                    conversation_history=[],
+                )
+                pipeline_metrics = pipeline.get_aggregated_metrics()
+                
+                if pipeline_context.context:
+                    enriched_message = f"{pipeline_context.context}\n\nUser Query: {message}"
+                    logger.info(
+                        f"[LiteLLM Streaming] Enriched message with pipeline context ({len(pipeline_context.context)} chars)"
+                    )
+            
+            # Build messages
+            messages = [
+                system_message,
+                {"role": "user", "content": enriched_message}
+            ]
+            
+            # IMPORTANT: Do NOT pass tools to LiteLLM for streaming mode
+            # Ollama's reasoning_content (thinking) feature is DISABLED when tools are provided
+            # The model will answer directly and show its thinking process
+            # For tool functionality, use the ADK streaming method instead
+            logger.info(f"[LiteLLM Streaming] Starting stream WITHOUT tools (enables reasoning_content)")
+            
+            # Call LiteLLM directly with streaming - NO TOOLS to enable reasoning
+            response = litellm.completion(
+                model=litellm_model,
+                messages=messages,
+                api_base="http://localhost:11434",
+                stream=True,
+                # tools=None intentionally - passing tools disables Ollama's reasoning mode
+            )
+            
+            chunk_count = 0
+            
+            for chunk in response:
+                chunk_count += 1
+                
+                if not chunk.choices:
+                    continue
+                    
+                delta = chunk.choices[0].delta
+                
+                # Check for reasoning_content (LiteLLM extracts <think> tags here)
+                # This is the model's thinking/deliberation process
+                reasoning = getattr(delta, 'reasoning_content', None)
+                if reasoning:
+                    current_reasoning += reasoning
+                    logger.debug(f"[LiteLLM Streaming] Chunk {chunk_count}: reasoning ({len(reasoning)} chars)")
+                    yield {
+                        "type": "reasoning_token",
+                        "data": {
+                            "token": reasoning,
+                            "cumulative_reasoning": current_reasoning,
+                        },
+                    }
+                    await asyncio.sleep(0)
+                
+                # Check for content (the actual response)
+                content = getattr(delta, 'content', None)
+                if content:
+                    current_response += content
+                    logger.debug(f"[LiteLLM Streaming] Chunk {chunk_count}: content ({len(content)} chars)")
+                    yield {
+                        "type": "token",
+                        "data": {
+                            "token": content,
+                            "cumulative_response": current_response,
+                        },
+                    }
+                    await asyncio.sleep(0)
+            
+            # Log completion
+            reasoning_length = len(current_reasoning.strip())
+            response_length = len(current_response.strip())
+            
+            logger.info(
+                f"[LiteLLM Streaming] COMPLETE - Model: {resolved_model}, "
+                f"Reasoning: {reasoning_length} chars, Response: {response_length} chars, "
+                f"Chunks: {chunk_count}"
+            )
+            
+            if reasoning_length > 0:
+                logger.info(f"[LiteLLM Streaming] Reasoning preview: {current_reasoning[:200]}...")
+            else:
+                logger.warning("[LiteLLM Streaming] No reasoning_content was received from LiteLLM")
+            
+            # Send completion
+            # Note: This streaming mode prioritizes showing reasoning over tool execution
+            # For tool functionality, use Token Streaming = OFF which uses ADK's run_async
+            complete_data = {
+                "model": resolved_model,
+                "reasoning_length": reasoning_length,
+                "response_length": response_length,
+                "pipeline_metrics": pipeline_metrics,
+            }
+            
+            # Include tool calls if any were detected
+            if tool_calls:
+                complete_data["tool_calls"] = tool_calls
+                logger.info(f"[Token Streaming] Including {len(tool_calls)} tool call(s) in complete event")
+            
+            yield {
+                "type": "complete",
+                "data": complete_data,
+            }
+            
+        except Exception as e:
+            logger.error(f"[LiteLLM Streaming] Error: {e}", exc_info=True)
+            yield {
+                "type": "error",
+                "data": {
+                    "error": str(e),
+                    "suggestion": "Check if Ollama is running and the model is available",
+                },
+            }
 
     async def process_message_stream(
         self,
@@ -1216,24 +1686,60 @@ class ADKAgentWrapper:
                 # Yield event info
                 event_type = type(event).__name__
 
-                if "tool" in event_type.lower():
-                    tool_call_data = {
-                        "name": event_type,
-                        "description": f"Tool invocation: {event_type}",
-                        "timestamp": datetime.utcnow().isoformat(),
-                    }
-                    tool_calls.append(tool_call_data)
-                    yield {
-                        "type": "tool_call",
-                        "data": {
-                            "message": f"{event_type}: Tool invocation: {event_type}"
-                        },
-                    }
-
-                # Extract text from content
+                # Extract content from event
                 if hasattr(event, "content") and event.content:
                     if hasattr(event.content, "parts"):
                         for part in event.content.parts:
+                            # Check for function call (tool usage)
+                            if hasattr(part, "function_call") and part.function_call:
+                                func_call = part.function_call
+                                tool_name = getattr(func_call, 'name', 'unknown_tool')
+                                
+                                # Extract function arguments if available
+                                tool_args = {}
+                                if hasattr(func_call, "args"):
+                                    try:
+                                        if isinstance(func_call.args, dict):
+                                            tool_args = func_call.args
+                                        elif isinstance(func_call.args, str):
+                                            import json
+                                            tool_args = json.loads(func_call.args)
+                                    except Exception as e:
+                                        logger.warning(f"Could not parse tool args: {e}")
+                                
+                                tool_call_data = {
+                                    "name": tool_name,
+                                    "description": f"Calling tool: {tool_name}",
+                                    "parameters": tool_args if tool_args else None,
+                                    "timestamp": datetime.utcnow().isoformat(),
+                                }
+                                tool_calls.append(tool_call_data)
+                                
+                                logger.info(f"[Standard Streaming] Tool call: {tool_name} with args: {tool_args}")
+                                yield {
+                                    "type": "tool_call",
+                                    "data": tool_call_data,
+                                }
+                            
+                            # Check for function response (tool result)
+                            if hasattr(part, "function_response") and part.function_response:
+                                func_response = part.function_response
+                                response_name = getattr(func_response, 'name', 'unknown')
+                                response_result = getattr(func_response, 'response', None)
+                                if response_result is None:
+                                    response_result = getattr(func_response, 'result', str(func_response))
+                                
+                                logger.info(f"[Standard Streaming] Tool result: {response_name} = {str(response_result)[:100]}...")
+                                yield {
+                                    "type": "tool_result",
+                                    "data": {
+                                        "name": response_name,
+                                        "result": response_result,
+                                        "timestamp": datetime.utcnow().isoformat(),
+                                    },
+                                }
+                            
+                            # Extract text content
                             if hasattr(part, "text") and part.text:
                                 response_text = part.text
 

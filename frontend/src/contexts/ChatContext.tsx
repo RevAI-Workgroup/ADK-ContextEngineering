@@ -30,13 +30,15 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [selectedModel, setSelectedModel] = useState<string | null>(null)
   
   // Initialize token streaming preference from localStorage
+  // Default: ON for better real-time streaming experience with reasoning display
   const [tokenStreamingEnabled, setTokenStreamingEnabled] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem(STREAMING_STORAGE_KEY)
-      return saved ? JSON.parse(saved) : false // Default: off
+      // Default to true (enabled) if no saved preference exists
+      return saved !== null ? JSON.parse(saved) : true
     } catch (error) {
       console.error('Failed to load token streaming preference:', error)
-      return false
+      return true // Default: on
     }
   })
   
