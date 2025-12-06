@@ -42,6 +42,9 @@ venv.bak/
 *~
 .DS_Store
 
+# Cursor IDE workspace storage files
+**/*User_workspaceStorage*
+
 # Jupyter Notebooks
 .ipynb_checkpoints
 notebooks/**/*.ipynb_checkpoints

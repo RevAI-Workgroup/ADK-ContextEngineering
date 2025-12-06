@@ -3,15 +3,20 @@ ADK Agent Wrapper for FastAPI integration.
 
 This module wraps the ADK agent to provide both synchronous and
 streaming interfaces for the FastAPI endpoints.
+
+IMPORTANT: Token streaming with tool calling uses Ollama's native Python SDK
+directly instead of LiteLLM, as LiteLLM has known limitations with tool calling
+during streaming mode with Ollama. See: https://github.com/BerriAI/litellm/issues/15399
 """
 
 import asyncio
+import json
 import logging
 import re
 import time
 import uuid
 from contextlib import nullcontext
-from typing import Dict, Any, List, AsyncGenerator, Optional, Tuple
+from typing import Dict, Any, List, AsyncGenerator, Optional, Tuple, Callable
 from datetime import datetime
 
 from context_engineering_agent.agent import root_agent, TOOLS, INSTRUCTION
@@ -23,10 +28,12 @@ from google.genai import types
 from src.core.config import get_config
 # Direct LiteLLM import for accessing reasoning_content that ADK doesn't expose
 import litellm
+# Native Ollama client for proper tool calling support during streaming
+import ollama
 from src.core.tracing import trace_span, record_metric, get_tracer
 from src.core.context_config import ContextEngineeringConfig
 from src.core.modular_pipeline import ContextPipeline
-from src.core.tools import search_knowledge_base
+from src.core.tools import search_knowledge_base, calculate, analyze_text, count_words, get_current_time
 import hashlib
 
 logger = logging.getLogger(__name__)
@@ -1554,6 +1561,446 @@ class ADKAgentWrapper:
                 "data": {
                     "error": str(e),
                     "suggestion": "Check if Ollama is running and the model is available",
+                },
+            }
+
+    def _build_ollama_tools(self, config: Optional[ContextEngineeringConfig] = None) -> List[Dict[str, Any]]:
+        """
+        Build tool definitions in Ollama's expected format.
+        
+        Args:
+            config: Optional configuration to include RAG tool
+            
+        Returns:
+            List of tool definitions for Ollama API
+        """
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "calculate",
+                    "description": "Evaluate a mathematical expression safely. Supports +, -, *, /, //, %, and ** operators.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "expression": {
+                                "type": "string",
+                                "description": "Mathematical expression to evaluate, e.g. '2 + 2' or '3**4'"
+                            }
+                        },
+                        "required": ["expression"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_current_time",
+                    "description": "Get the current time in a specific city or timezone. Use timezone identifiers like 'America/New_York', 'Europe/London', 'Asia/Tokyo'.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "city": {
+                                "type": "string",
+                                "description": "City name or timezone identifier (e.g., 'America/New_York', 'Europe/Paris', 'Asia/Tokyo')"
+                            }
+                        },
+                        "required": ["city"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "analyze_text",
+                    "description": "Analyze text and return comprehensive statistics including word count, character count, sentence count, etc.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "text": {
+                                "type": "string",
+                                "description": "The text to analyze"
+                            }
+                        },
+                        "required": ["text"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "count_words",
+                    "description": "Count the number of words in a text string.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "text": {
+                                "type": "string",
+                                "description": "The text to count words in"
+                            }
+                        },
+                        "required": ["text"]
+                    }
+                }
+            }
+        ]
+        
+        # Add RAG tool if enabled
+        if config and config.rag_tool_enabled:
+            tools.append({
+                "type": "function",
+                "function": {
+                    "name": "search_knowledge_base",
+                    "description": "Search the knowledge base for relevant documents and information. Use this PROACTIVELY for any question that could benefit from documentation or external data.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "The search query describing what information you need"
+                            },
+                            "top_k": {
+                                "type": "integer",
+                                "description": "Number of documents to retrieve (default: 5)"
+                            }
+                        },
+                        "required": ["query"]
+                    }
+                }
+            })
+            
+        return tools
+    
+    def _execute_tool(self, tool_name: str, tool_args: Dict[str, Any]) -> Any:
+        """
+        Execute a tool by name with the given arguments.
+        
+        Args:
+            tool_name: Name of the tool to execute
+            tool_args: Arguments to pass to the tool
+            
+        Returns:
+            Tool execution result
+        """
+        # Map tool names to actual functions
+        tool_map: Dict[str, Callable] = {
+            "calculate": calculate,
+            "get_current_time": get_current_time,
+            "analyze_text": analyze_text,
+            "count_words": count_words,
+            "search_knowledge_base": search_knowledge_base,
+        }
+        
+        if tool_name not in tool_map:
+            return {"error": f"Unknown tool: {tool_name}"}
+        
+        try:
+            tool_func = tool_map[tool_name]
+            result = tool_func(**tool_args)
+            logger.info(f"[Tool Execution] {tool_name} executed successfully")
+            return result
+        except Exception as e:
+            logger.error(f"[Tool Execution] Error executing {tool_name}: {e}", exc_info=True)
+            return {"error": f"Tool execution failed: {str(e)}"}
+
+    async def process_message_stream_native_ollama(
+        self,
+        message: str,
+        session_id: Optional[str] = None,
+        model: Optional[str] = None,
+        config: Optional[ContextEngineeringConfig] = None,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        Stream tokens using Ollama's native Python SDK with PROPER tool calling support.
+        
+        This method bypasses LiteLLM entirely to avoid the known limitation where
+        LiteLLM + Ollama doesn't properly handle tool calls during streaming.
+        See: https://github.com/BerriAI/litellm/issues/15399
+        
+        The approach:
+        1. First, make a non-streaming call with tools to detect if the model wants to use tools
+        2. If tool calls are detected, execute them and collect results
+        3. Continue the conversation with tool results (supports multi-step tool usage)
+        4. Stream the final response to the user
+        
+        Args:
+            message: User's message
+            session_id: Optional session ID
+            model: Optional model name (e.g., "qwen3:8b")
+            config: Optional context engineering configuration
+            
+        Yields:
+            Dictionary events for reasoning_token, token, tool_call, tool_result, complete, error
+        """
+        resolved_model = model if model else "qwen3:4b"
+        logger.info(
+            f"[Native Ollama] Processing with model '{resolved_model}': {message[:50]}..."
+        )
+        
+        current_reasoning = ""
+        current_response = ""
+        all_tool_calls = []  # Track all tool calls during the conversation
+        
+        try:
+            # Initialize Ollama async client
+            client = ollama.AsyncClient()
+            
+            # Build system message with our instruction
+            system_message = {"role": "system", "content": INSTRUCTION}
+            
+            # Process pipeline context if config provided
+            enriched_message = message
+            pipeline_metrics = {}
+            enabled_techniques = []
+            
+            if config:
+                enabled_techniques = config.get_enabled_techniques()
+                yield {
+                    "type": "thinking",
+                    "data": {"message": f"Running context engineering: {', '.join(enabled_techniques)}"},
+                }
+                
+                pipeline = ContextPipeline(config)
+                pipeline_context = pipeline.process(
+                    query=message,
+                    conversation_history=[],
+                )
+                pipeline_metrics = pipeline.get_aggregated_metrics()
+                
+                if pipeline_context.context:
+                    enriched_message = f"{pipeline_context.context}\n\nUser Query: {message}"
+                    logger.info(
+                        f"[Native Ollama] Enriched message with pipeline context ({len(pipeline_context.context)} chars)"
+                    )
+            
+            # Build tools in Ollama format
+            tools = self._build_ollama_tools(config)
+            logger.info(f"[Native Ollama] Using {len(tools)} tools: {[t['function']['name'] for t in tools]}")
+            
+            # Build initial messages
+            messages = [
+                system_message,
+                {"role": "user", "content": enriched_message}
+            ]
+            
+            # Agentic loop: Continue until no more tool calls
+            max_iterations = 10  # Safety limit to prevent infinite loops
+            iteration = 0
+            
+            while iteration < max_iterations:
+                iteration += 1
+                logger.info(f"[Native Ollama] Iteration {iteration}: Making API call...")
+                
+                # Yield thinking event at the start
+                if iteration == 1:
+                    yield {
+                        "type": "thinking",
+                        "data": {"message": "Processing your request..."},
+                    }
+                
+                # Make non-streaming call to detect tool usage
+                # NOTE: Ollama requires stream=False for proper tool call detection
+                response = await client.chat(
+                    model=resolved_model,
+                    messages=messages,
+                    tools=tools,
+                    stream=False,
+                )
+                
+                response_message = response.get("message", {})
+                content = response_message.get("content", "")
+                tool_calls = response_message.get("tool_calls", [])
+                
+                logger.info(
+                    f"[Native Ollama] Response: content_len={len(content) if content else 0}, "
+                    f"tool_calls={len(tool_calls) if tool_calls else 0}"
+                )
+                
+                # Extract reasoning from <think> tags if present in content
+                if content:
+                    think_pattern = re.compile(r'<think>(.*?)</think>', re.DOTALL | re.IGNORECASE)
+                    matches = think_pattern.findall(content)
+                    for match in matches:
+                        if match.strip():
+                            reasoning_chunk = match.strip()
+                            current_reasoning += reasoning_chunk + "\n"
+                            yield {
+                                "type": "reasoning_token",
+                                "data": {
+                                    "token": reasoning_chunk,
+                                    "cumulative_reasoning": current_reasoning,
+                                },
+                            }
+                            await asyncio.sleep(0)
+                    
+                    # Remove think tags from content for the actual response
+                    clean_content = think_pattern.sub('', content).strip()
+                else:
+                    clean_content = ""
+                
+                # Check if model wants to use tools
+                if tool_calls:
+                    logger.info(f"[Native Ollama] Processing {len(tool_calls)} tool call(s)")
+                    
+                    # Add assistant message with tool calls to history
+                    messages.append(response_message)
+                    
+                    # Process each tool call
+                    for tool_call in tool_calls:
+                        func = tool_call.get("function", {})
+                        tool_name = func.get("name", "unknown")
+                        tool_args = func.get("arguments", {})
+                        
+                        # Handle arguments - might be string or dict
+                        if isinstance(tool_args, str):
+                            try:
+                                tool_args = json.loads(tool_args)
+                            except json.JSONDecodeError:
+                                tool_args = {}
+                        
+                        logger.info(f"[Native Ollama] Executing tool: {tool_name} with args: {tool_args}")
+                        
+                        # Yield tool_call event to frontend
+                        tool_call_data = {
+                            "name": tool_name,
+                            "description": f"Calling tool: {tool_name}",
+                            "parameters": tool_args,
+                            "timestamp": datetime.utcnow().isoformat(),
+                        }
+                        all_tool_calls.append(tool_call_data)
+                        
+                        yield {
+                            "type": "tool_call",
+                            "data": tool_call_data,
+                        }
+                        await asyncio.sleep(0)
+                        
+                        # Execute the tool
+                        tool_result = self._execute_tool(tool_name, tool_args)
+                        
+                        # Convert result to string for the message
+                        if isinstance(tool_result, dict):
+                            tool_result_str = json.dumps(tool_result)
+                        else:
+                            tool_result_str = str(tool_result)
+                        
+                        logger.info(f"[Native Ollama] Tool result: {tool_result_str[:200]}...")
+                        
+                        # Yield tool_result event to frontend
+                        yield {
+                            "type": "tool_result",
+                            "data": {
+                                "name": tool_name,
+                                "result": tool_result,
+                                "timestamp": datetime.utcnow().isoformat(),
+                            },
+                        }
+                        await asyncio.sleep(0)
+                        
+                        # Update the tool call data with result
+                        tool_call_data["result"] = tool_result
+                        
+                        # Add tool response to messages
+                        messages.append({
+                            "role": "tool",
+                            "content": tool_result_str,
+                        })
+                    
+                    # Continue loop to let model respond with tool results
+                    continue
+                else:
+                    # No tool calls - this is the final response
+                    logger.info(f"[Native Ollama] No tool calls, streaming final response...")
+                    
+                    # If we have clean content from the non-streaming call, stream it
+                    if clean_content:
+                        # Stream the response token by token for better UX
+                        # We'll simulate token-by-token streaming from the complete response
+                        words = clean_content.split(' ')
+                        for i, word in enumerate(words):
+                            token = word + (' ' if i < len(words) - 1 else '')
+                            current_response += token
+                            yield {
+                                "type": "token",
+                                "data": {
+                                    "token": token,
+                                    "cumulative_response": current_response,
+                                },
+                            }
+                            # Small delay to simulate streaming feel
+                            await asyncio.sleep(0.02)
+                    
+                    # Exit the agentic loop
+                    break
+            
+            if iteration >= max_iterations:
+                logger.warning(f"[Native Ollama] Max iterations ({max_iterations}) reached")
+                yield {
+                    "type": "error",
+                    "data": {
+                        "error": "Maximum tool call iterations reached",
+                        "suggestion": "The model may be stuck in a tool-calling loop",
+                    },
+                }
+                return
+            
+            # Log completion
+            reasoning_length = len(current_reasoning.strip())
+            response_length = len(current_response.strip())
+            
+            logger.info(
+                f"[Native Ollama] COMPLETE - Model: {resolved_model}, "
+                f"Reasoning: {reasoning_length} chars, Response: {response_length} chars, "
+                f"Tool calls: {len(all_tool_calls)}, Iterations: {iteration}"
+            )
+            
+            if reasoning_length > 0:
+                logger.info(f"[Native Ollama] Reasoning preview: {current_reasoning[:200]}...")
+            
+            # Send completion
+            complete_data = {
+                "model": resolved_model,
+                "reasoning_length": reasoning_length,
+                "response_length": response_length,
+                "pipeline_metrics": pipeline_metrics,
+                "enabled_techniques": enabled_techniques,
+            }
+            
+            # Include tool calls if any were executed
+            if all_tool_calls:
+                complete_data["tool_calls"] = all_tool_calls
+                logger.info(f"[Native Ollama] Including {len(all_tool_calls)} tool call(s) in complete event")
+            
+            yield {
+                "type": "complete",
+                "data": complete_data,
+            }
+            
+        except ollama.ResponseError as e:
+            logger.error(f"[Native Ollama] Ollama ResponseError: {e}", exc_info=True)
+            yield {
+                "type": "error",
+                "data": {
+                    "error": f"Ollama error: {str(e)}",
+                    "suggestion": "Check if the model is installed. Run: ollama pull " + resolved_model,
+                },
+            }
+        except Exception as e:
+            logger.error(f"[Native Ollama] Error: {e}", exc_info=True)
+            
+            error_msg = str(e)
+            suggestion = "Check the backend logs for more details"
+            
+            if "connection" in error_msg.lower() or "connect" in error_msg.lower():
+                suggestion = "Ensure Ollama is running: ollama serve"
+            elif "model" in error_msg.lower() and "not found" in error_msg.lower():
+                suggestion = f"Check if the model is installed. Run: ollama pull {resolved_model}"
+            
+            yield {
+                "type": "error",
+                "data": {
+                    "error": error_msg,
+                    "suggestion": suggestion,
                 },
             }
 

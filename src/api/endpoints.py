@@ -364,10 +364,11 @@ async def chat_websocket(websocket: WebSocket):
                 # Process message with streaming (choose method based on token streaming preference)
                 try:
                     if enable_token_streaming:
-                        logger.info("Using LiteLLM direct streaming mode (accesses reasoning_content)")
-                        # Use LiteLLM direct streaming to get reasoning_content
-                        # This bypasses ADK's abstraction to access model thinking
-                        async for event in adk_wrapper.process_message_stream_litellm(
+                        logger.info("Using Native Ollama streaming mode (proper tool calling + reasoning)")
+                        # Use Native Ollama SDK for proper tool calling support during streaming
+                        # This bypasses LiteLLM which has known issues with tool calling + streaming
+                        # See: https://github.com/BerriAI/litellm/issues/15399
+                        async for event in adk_wrapper.process_message_stream_native_ollama(
                             message=message_data["message"],
                             session_id=message_data.get("session_id"),
                             model=selected_model,

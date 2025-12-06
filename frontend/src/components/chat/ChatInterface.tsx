@@ -42,6 +42,15 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
     toolCalls: ToolCall[]
   } | null>(null)
 
+  // Ref to track streaming content synchronously (avoids stale closure issues)
+  // This is updated in sync with the state but can be read without closure staleness
+  const streamingContentRef = useRef<{
+    reasoning: string
+    response: string
+    messageId: string
+    toolCalls: ToolCall[]
+  } | null>(null)
+
   // Track last processed event to avoid re-processing on every update
   const lastProcessedEventIndex = useRef<number>(-1)
 
@@ -51,6 +60,9 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
 
   // Track timeout for delayed disconnection error
   const disconnectionTimeoutRef = useRef<number | null>(null)
+
+  // Ref for the scrollable chat container
+  const chatContainerRef = useRef<HTMLDivElement>(null)
 
   // Cleanup disconnection timeout on unmount
   useEffect(() => {
@@ -84,6 +96,8 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
       setErrorMessage(errorMsg)
       setIsProcessing(false)
       streamingMessageRef.current = null
+      // Clear both ref and state
+      streamingContentRef.current = null
       setStreamingContent(null)
     }
   }, [wsError, isProcessing, useRealtime, setErrorMessage, setIsProcessing])
@@ -136,12 +150,20 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
     // Only process events that haven't been processed yet
     const newEvents = events.slice(lastProcessedEventIndex.current + 1)
     
+    // Track if we hit a terminal event (complete/error) that resets state
+    let hitTerminalEvent = false
+    
     newEvents.forEach((event) => {
+      // Skip processing if we've already hit a terminal event
+      if (hitTerminalEvent) return
+      
       // Debug logging for all event types
       console.log(`[ChatInterface] Processing event: ${event.type}`, {
         dataKeys: Object.keys(event.data || {}),
         tokenStreamingEnabled,
-        hasStreamingContent: !!streamingContent
+        hasStreamingContentRef: !!streamingContentRef.current,
+        eventsLength: events.length,
+        lastProcessedIndex: lastProcessedEventIndex.current
       })
 
       switch (event.type) {
@@ -151,13 +173,21 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
             const tokenText = event.data.token
             console.log(`[ChatInterface] 📝 Response token (${tokenText.length} chars):`, tokenText.slice(0, 50))
             
-            // Guard: early return if streamingContent is not initialized
-            // This ensures we reuse the messageId from handleSendMessage
+            // Guard: use ref to check initialization (avoids stale closure)
+            if (!streamingContentRef.current) {
+              console.warn('[ChatInterface] Token event received before streamingContent initialization, ignoring')
+              break
+            }
+            
+            // Update ref synchronously
+            streamingContentRef.current = {
+              ...streamingContentRef.current,
+              response: streamingContentRef.current.response + tokenText,
+            }
+            
+            // Also update state for UI rendering
             setStreamingContent(prev => {
-              if (!prev) {
-                console.warn('[ChatInterface] Token event received before streamingContent initialization, ignoring')
-                return null
-              }
+              if (!prev) return streamingContentRef.current
               return {
                 reasoning: prev.reasoning,
                 response: prev.response + tokenText,
@@ -175,17 +205,25 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
             const reasoningText = event.data.token
             console.log(`[ChatInterface] 🧠 Reasoning token (${reasoningText.length} chars):`, reasoningText.slice(0, 50))
             
-            // Guard: early return if streamingContent is not initialized
-            // This ensures we reuse the messageId from handleSendMessage
+            // Guard: use ref to check initialization (avoids stale closure)
+            if (!streamingContentRef.current) {
+              console.warn('[ChatInterface] Reasoning token event received before streamingContent initialization, ignoring')
+              break
+            }
+            
+            // Update ref synchronously
+            const newReasoning = streamingContentRef.current.reasoning + reasoningText
+            streamingContentRef.current = {
+              ...streamingContentRef.current,
+              reasoning: newReasoning,
+            }
+            console.log(`[ChatInterface] 🧠 Cumulative reasoning now ${newReasoning.length} chars`)
+            
+            // Also update state for UI rendering
             setStreamingContent(prev => {
-              if (!prev) {
-                console.warn('[ChatInterface] Reasoning token event received before streamingContent initialization, ignoring')
-                return null
-              }
-              const newReasoning = prev.reasoning + reasoningText
-              console.log(`[ChatInterface] 🧠 Cumulative reasoning now ${newReasoning.length} chars`)
+              if (!prev) return streamingContentRef.current
               return {
-                reasoning: newReasoning,
+                reasoning: prev.reasoning + reasoningText,
                 response: prev.response,
                 messageId: prev.messageId,
                 toolCalls: prev.toolCalls || []
@@ -252,17 +290,26 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
           
           // Track tool calls in token streaming mode
           if (tokenStreamingEnabled) {
+            // Guard: use ref to check initialization (avoids stale closure)
+            if (!streamingContentRef.current) {
+              console.warn('[ChatInterface] Tool call event received before streamingContent initialization, ignoring')
+              break
+            }
+            
+            // Update ref synchronously
+            streamingContentRef.current = {
+              ...streamingContentRef.current,
+              toolCalls: [...streamingContentRef.current.toolCalls, toolCall]
+            }
+            console.log('[ChatInterface] Tool call added to token streaming mode (ref), total:', streamingContentRef.current.toolCalls.length)
+            
+            // Also update state for UI rendering
             setStreamingContent(prev => {
-              if (!prev) {
-                console.warn('[ChatInterface] Tool call event received before streamingContent initialization, ignoring')
-                return null
-              }
-              const updated = {
+              if (!prev) return streamingContentRef.current
+              return {
                 ...prev,
                 toolCalls: [...prev.toolCalls, toolCall]
               }
-              console.log('[ChatInterface] Tool call added to token streaming mode, total:', updated.toolCalls.length)
-              return updated
             })
           }
           break
@@ -286,16 +333,35 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
           
           // Update tool call with result in token streaming mode
           if (tokenStreamingEnabled) {
+            // Guard: use ref to check initialization (avoids stale closure)
+            if (!streamingContentRef.current) {
+              console.warn('[ChatInterface] Tool result event received before streamingContent initialization, ignoring')
+              break
+            }
+            
+            // Update ref synchronously
+            const updatedToolCalls = streamingContentRef.current.toolCalls.map(tc => {
+              if (tc.name === resultData.name && !tc.result) {
+                return { ...tc, result: resultData.result }
+              }
+              return tc
+            })
+            streamingContentRef.current = {
+              ...streamingContentRef.current,
+              toolCalls: updatedToolCalls
+            }
+            console.log('[ChatInterface] Tool result added to token streaming mode (ref) for:', resultData.name)
+            
+            // Also update state for UI rendering
             setStreamingContent(prev => {
-              if (!prev) return null
-              const updatedToolCalls = prev.toolCalls.map(tc => {
+              if (!prev) return streamingContentRef.current
+              const stateUpdatedToolCalls = prev.toolCalls.map(tc => {
                 if (tc.name === resultData.name && !tc.result) {
                   return { ...tc, result: resultData.result }
                 }
                 return tc
               })
-              console.log('[ChatInterface] Tool result added to token streaming mode for:', resultData.name)
-              return { ...prev, toolCalls: updatedToolCalls }
+              return { ...prev, toolCalls: stateUpdatedToolCalls }
             })
           }
           break
@@ -324,12 +390,16 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
         case 'complete': {
           // TypeScript now knows event.data is CompleteEventData
           // Finalize the streaming message and add it to chat
+          // Use ref to avoid stale closure issues - the ref is updated synchronously
+          const currentStreamingContent = streamingContentRef.current
+          
           console.log('[ChatInterface] ✅ COMPLETE event received', {
             model: event.data?.model,
             reasoning_length: event.data?.reasoning_length,
             response_length: event.data?.response_length,
             tokenStreamingEnabled,
-            hasStreamingContent: !!streamingContent
+            hasStreamingContent: !!currentStreamingContent,
+            hasStreamingContentState: !!streamingContent
           })
           
           // Clear any pending disconnection timeout since we completed successfully
@@ -338,10 +408,10 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
             disconnectionTimeoutRef.current = null
           }
           
-          if (tokenStreamingEnabled && streamingContent) {
-            // Token streaming mode: use accumulated content
-            const finalReasoning = (streamingContent.reasoning || '').trimEnd()
-            const finalResponse = streamingContent.response.trimEnd()
+          if (tokenStreamingEnabled && currentStreamingContent) {
+            // Token streaming mode: use accumulated content from ref
+            const finalReasoning = (currentStreamingContent.reasoning || '').trimEnd()
+            const finalResponse = currentStreamingContent.response.trimEnd()
             
             console.log('[ChatInterface] 📊 Final content summary:', {
               reasoningChars: finalReasoning.length,
@@ -351,7 +421,7 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
             })
             
             // Merge tool calls from streaming content and complete event
-            const toolCallsFromStream = streamingContent.toolCalls || []
+            const toolCallsFromStream = currentStreamingContent.toolCalls || []
             const toolCallsFromComplete = event.data?.tool_calls || []
             const allToolCalls = [...toolCallsFromStream, ...toolCallsFromComplete]
             
@@ -363,7 +433,7 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
             })
             
             const assistantMessage: Message = {
-              id: streamingContent.messageId,
+              id: currentStreamingContent.messageId,
               role: 'assistant',
               content: finalResponse,
               reasoning: finalReasoning ? finalReasoning : undefined,
@@ -379,6 +449,8 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
                 : undefined,
             }
             setMessages((prev) => [...prev, assistantMessage])
+            // Clear both ref and state
+            streamingContentRef.current = null
             setStreamingContent(null)
           } else if (streamingMessageRef.current) {
             // Standard mode: use ref content
@@ -409,6 +481,7 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
           setIsProcessing(false)
           lastProcessedEventIndex.current = -1 // Reset event tracking
           clearEvents()
+          hitTerminalEvent = true // Prevent further processing and index update
           break
         }
 
@@ -437,20 +510,43 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
           
           setErrorMessage(errorMsg)
           streamingMessageRef.current = null
+          // Clear both ref and state
+          streamingContentRef.current = null
           setStreamingContent(null)
           setIsProcessing(false)
           lastProcessedEventIndex.current = -1 // Reset event tracking
           clearEvents()
+          hitTerminalEvent = true // Prevent further processing and index update
           break
         }
       }
     })
     
     // Update the last processed index to the last event we just handled
-    if (newEvents.length > 0) {
+    // BUT don't update if we hit a terminal event (complete/error) which resets the index
+    if (newEvents.length > 0 && !hitTerminalEvent) {
       lastProcessedEventIndex.current = events.length - 1
     }
-  }, [events, useRealtime, tokenStreamingEnabled, streamingContent, clearEvents, setMessages, setErrorMessage, setIsProcessing, selectedModel])
+  // Note: streamingContent removed from deps - we use streamingContentRef to avoid stale closures
+  }, [events, useRealtime, tokenStreamingEnabled, clearEvents, setMessages, setErrorMessage, setIsProcessing, selectedModel])
+
+  // Auto-scroll to bottom when messages or streaming content changes
+  useEffect(() => {
+    if (chatContainerRef.current) {
+      // Use requestAnimationFrame to ensure DOM updates are complete before scrolling
+      const scrollToBottom = () => {
+        if (chatContainerRef.current) {
+          // Use instant scroll for better performance during streaming updates
+          chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight
+        }
+      }
+      
+      // Double RAF ensures layout calculations are complete
+      requestAnimationFrame(() => {
+        requestAnimationFrame(scrollToBottom)
+      })
+    }
+  }, [messages, streamingContent, isProcessing])
 
   const handleSendMessage = async (content: string) => {
     // Clear any previous errors on retry
@@ -488,12 +584,15 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
         // Use WebSocket for real-time streaming
         if (tokenStreamingEnabled) {
           // Token streaming mode - initialize streaming content
-          setStreamingContent({
+          // Update BOTH the ref (synchronous) and state (async) to avoid stale closure issues
+          const newStreamingContent = {
             reasoning: '',
             response: '',
             messageId: (Date.now() + 1).toString(),
-            toolCalls: [],
-          })
+            toolCalls: [] as ToolCall[],
+          }
+          streamingContentRef.current = newStreamingContent
+          setStreamingContent(newStreamingContent)
         } else {
           // Standard mode - initialize the streaming message container
           streamingMessageRef.current = {
@@ -583,6 +682,8 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
         if (streamingMessageRef.current) {
           streamingMessageRef.current = null
         }
+        // Clear both ref and state
+        streamingContentRef.current = null
         if (streamingContent) {
           setStreamingContent(null)
         }
@@ -645,7 +746,7 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
       )}
       
       {/* Custom Chat Display */}
-      <Card className="flex-1 p-4 overflow-y-auto">
+      <Card ref={chatContainerRef} className="flex-1 p-4 overflow-y-auto">
         <div className="space-y-4">
           {messages.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center">
