@@ -47,6 +47,7 @@ export interface Message {
   toolCalls?: ToolCall[]
   timestamp: string
   model?: string
+  executionTimeMs?: number  // Total execution time from query to response
   pipelineMetadata?: RAGMetadata
   pipelineMetrics?: PipelineMetrics
   metrics?: {
@@ -97,6 +98,7 @@ export interface CompleteEventData {
   model?: string
   reasoning_length?: number
   response_length?: number
+  execution_time_ms?: number
   pipeline_metrics?: PipelineMetrics
   pipeline_metadata?: RAGMetadata
   enabled_techniques?: string[]

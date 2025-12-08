@@ -420,14 +420,14 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
               responsePreview: finalResponse.slice(0, 100)
             })
             
-            // Merge tool calls from streaming content and complete event
+            // Use tool calls from streaming content only (they were already sent via tool_call events)
+            // The complete event may include the same tool_calls for non-streaming clients,
+            // but we don't merge them to avoid duplicates
             const toolCallsFromStream = currentStreamingContent.toolCalls || []
-            const toolCallsFromComplete = event.data?.tool_calls || []
-            const allToolCalls = [...toolCallsFromStream, ...toolCallsFromComplete]
+            const allToolCalls = toolCallsFromStream
             
             console.log('[ChatInterface] 📊 Finalizing message with tool calls:', {
               fromStream: toolCallsFromStream.length,
-              fromComplete: toolCallsFromComplete.length,
               total: allToolCalls.length,
               toolCalls: allToolCalls
             })
@@ -440,6 +440,7 @@ export function ChatInterface({ useRealtime = false }: ChatInterfaceProps) {
               toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
               timestamp: event.timestamp,
               model: event.data?.model || selectedModel || undefined,
+              executionTimeMs: event.data?.execution_time_ms,
               pipelineMetadata: event.data?.pipeline_metadata,
               pipelineMetrics: event.data?.pipeline_metrics,
               metrics: event.data?.enabled_techniques

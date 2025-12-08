@@ -1,12 +1,28 @@
 import { Message } from '../../types/message.types'
 import { Card, CardContent } from '../ui/card'
-import { User, Bot, Clock, Cpu } from 'lucide-react'
+import { User, Bot, Clock, Cpu, Timer } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { ThinkingDisplay } from './ThinkingDisplay'
 import { CollapsibleReasoning } from './CollapsibleReasoning'
 import { ToolOutputDisplay } from './ToolOutputDisplay'
 import { RAGFeedback } from './RAGFeedback'
 import { Badge } from '../ui/badge'
+
+/**
+ * Format execution time in a human-readable format
+ */
+function formatExecutionTime(ms: number): string {
+  if (ms < 1000) {
+    return `${Math.round(ms)}ms`
+  }
+  const seconds = ms / 1000
+  if (seconds < 60) {
+    return `${seconds.toFixed(1)}s`
+  }
+  const minutes = Math.floor(seconds / 60)
+  const remainingSeconds = seconds % 60
+  return `${minutes}m ${remainingSeconds.toFixed(0)}s`
+}
 
 interface ChatMessageProps {
   message: Message
@@ -53,7 +69,7 @@ export function ChatMessage({ message, isStreaming = false }: ChatMessageProps) 
           <CardContent className="p-3">
             <p className="text-sm whitespace-pre-wrap">{message.content}</p>
 
-            {/* Timestamp and Model Info */}
+            {/* Timestamp, Execution Time, and Model Info */}
             <div
               className={cn(
                 'mt-2 flex items-center gap-3 text-xs',
@@ -66,6 +82,12 @@ export function ChatMessage({ message, isStreaming = false }: ChatMessageProps) 
                   {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </span>
               </div>
+              {!isUser && message.executionTimeMs && (
+                <div className="flex items-center gap-1" title="Total execution time from query to response">
+                  <Timer className="h-3 w-3" />
+                  <span>{formatExecutionTime(message.executionTimeMs)}</span>
+                </div>
+              )}
               {!isUser && message.model && (
                 <Badge variant="secondary" className="flex items-center gap-1 text-xs h-5 px-2">
                   <Cpu className="h-3 w-3" />

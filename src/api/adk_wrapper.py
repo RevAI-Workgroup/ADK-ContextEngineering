@@ -1737,6 +1737,9 @@ class ADKAgentWrapper:
             f"[Native Ollama] Processing with model '{resolved_model}': {message[:50]}..."
         )
         
+        # Track execution time for performance monitoring
+        start_time = time.time()
+        
         current_reasoning = ""
         current_response = ""
         all_tool_calls = []  # Track all tool calls during the conversation
@@ -1855,9 +1858,15 @@ class ADKAgentWrapper:
                         if isinstance(tool_args, str):
                             try:
                                 tool_args = json.loads(tool_args)
-                            except json.JSONDecodeError:
-                                tool_args = {}
-                        
+                            except json.JSONDecodeError as e:
+                                logger.error(f"Failed to parse tool arguments for {tool_name}: {e}")
+                                yield {
+                                    "type": "error",
+                                    "data": {
+                                        "error": f"Invalid tool arguments for {tool_name}: {str(e)}",
+                                    },
+                                }
+                                return                        
                         logger.info(f"[Native Ollama] Executing tool: {tool_name} with args: {tool_args}")
                         
                         # Yield tool_call event to frontend
@@ -1948,10 +1957,14 @@ class ADKAgentWrapper:
             reasoning_length = len(current_reasoning.strip())
             response_length = len(current_response.strip())
             
+            # Calculate total execution time
+            execution_time_ms = (time.time() - start_time) * 1000
+            
             logger.info(
                 f"[Native Ollama] COMPLETE - Model: {resolved_model}, "
                 f"Reasoning: {reasoning_length} chars, Response: {response_length} chars, "
-                f"Tool calls: {len(all_tool_calls)}, Iterations: {iteration}"
+                f"Tool calls: {len(all_tool_calls)}, Iterations: {iteration}, "
+                f"Execution time: {execution_time_ms:.0f}ms"
             )
             
             if reasoning_length > 0:
@@ -1962,6 +1975,7 @@ class ADKAgentWrapper:
                 "model": resolved_model,
                 "reasoning_length": reasoning_length,
                 "response_length": response_length,
+                "execution_time_ms": round(execution_time_ms),
                 "pipeline_metrics": pipeline_metrics,
                 "enabled_techniques": enabled_techniques,
             }
