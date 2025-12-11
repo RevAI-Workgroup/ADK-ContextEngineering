@@ -35,8 +35,20 @@ from src.core.context_config import ContextEngineeringConfig
 from src.core.modular_pipeline import ContextPipeline
 from src.core.tools import search_knowledge_base, calculate, analyze_text, count_words, get_current_time
 import hashlib
+import sys
 
 logger = logging.getLogger(__name__)
+
+
+def _flush_logs():
+    """Force flush all log handlers to ensure real-time output."""
+    for handler in logger.handlers:
+        handler.flush()
+    for handler in logging.root.handlers:
+        handler.flush()
+    # Also flush stdout/stderr directly
+    sys.stdout.flush()
+    sys.stderr.flush()
 
 
 class _NullSpan:
@@ -822,6 +834,7 @@ class ADKAgentWrapper:
         logger.info(
             f"Processing message with token streaming (model: '{model or 'default'}'): {message[:50]}..."
         )
+        _flush_logs()
 
         try:
             # Get the appropriate runner for the specified model
@@ -857,6 +870,7 @@ class ADKAgentWrapper:
                 logger.info(
                     f"Initializing context engineering pipeline with config: {config.get_enabled_techniques()}"
                 )
+                _flush_logs()
                 pipeline = ContextPipeline(config)
                 enabled_techniques = config.get_enabled_techniques()
 
@@ -905,6 +919,7 @@ class ADKAgentWrapper:
 
             # Run agent and stream tokens as they arrive
             logger.info(f"Invoking agent with token streaming for session {session_id}")
+            _flush_logs()
 
             current_reasoning = ""
             current_response = ""
@@ -1736,6 +1751,7 @@ class ADKAgentWrapper:
         logger.info(
             f"[Native Ollama] Processing with model '{resolved_model}': {message[:50]}..."
         )
+        _flush_logs()
         
         start_time = time.time()
         
@@ -1788,6 +1804,7 @@ class ADKAgentWrapper:
             while iteration < max_iterations:
                 iteration += 1
                 logger.info(f"[Native Ollama] Iteration {iteration}: Streaming response with tools...")
+                _flush_logs()
                 
                 if iteration == 1:
                     yield {
@@ -1874,10 +1891,12 @@ class ADKAgentWrapper:
                     f"content={len(current_turn_content)} chars, "
                     f"tool_calls={len(current_turn_tool_calls)}"
                 )
+                _flush_logs()
                 
                 # 4. Decide: Execute Tools OR Finish
                 if current_turn_tool_calls:
                     logger.info(f"[Native Ollama] Processing {len(current_turn_tool_calls)} tool call(s)")
+                    _flush_logs()
                     
                     # Build the assistant message to add to history
                     # We need to reconstruct it since we streamed
@@ -1909,6 +1928,7 @@ class ADKAgentWrapper:
                                 tool_args = {}
 
                         logger.info(f"[Native Ollama] Executing tool: {tool_name} with args: {tool_args}")
+                        _flush_logs()
 
                         # Notify Frontend of tool call
                         tool_call_data = {

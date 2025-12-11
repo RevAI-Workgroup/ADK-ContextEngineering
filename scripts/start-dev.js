@@ -149,7 +149,8 @@ function startBackend() {
       // IMPORTANT: Use 'call' before activate.bat to ensure the command chain continues
       // Without 'call', the && chain breaks after the batch file executes
       // Set CHROMA_TELEMETRY_ENABLED=false to prevent ChromaDB telemetry warning
-      backendProcess = spawn('cmd', ['/c', `call venv\\Scripts\\activate.bat && set "PYTHONPATH=${rootDir}" && set "CHROMA_TELEMETRY_ENABLED=false" && uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000`], {
+      // Set PYTHONUNBUFFERED=1 to ensure logs appear in real-time (no buffering)
+      backendProcess = spawn('cmd', ['/c', `call venv\\Scripts\\activate.bat && set "PYTHONPATH=${rootDir}" && set "CHROMA_TELEMETRY_ENABLED=false" && set "PYTHONUNBUFFERED=1" && uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000`], {
         cwd: rootDir,
         stdio: 'pipe'
       });
@@ -157,7 +158,8 @@ function startBackend() {
       // Unix (macOS/Linux): Use bash to source activation and run uvicorn
       // Match start-dev.sh: export PYTHONPATH="${PYTHONPATH}:$(pwd)"
       // Set CHROMA_TELEMETRY_ENABLED=false to prevent ChromaDB telemetry warning
-      backendProcess = spawn('bash', ['-c', `source venv/bin/activate && export PYTHONPATH="$PYTHONPATH:${rootDir}" && export CHROMA_TELEMETRY_ENABLED=false && uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000`], {
+      // Set PYTHONUNBUFFERED=1 to ensure logs appear in real-time (no buffering)
+      backendProcess = spawn('bash', ['-c', `source venv/bin/activate && export PYTHONPATH="$PYTHONPATH:${rootDir}" && export CHROMA_TELEMETRY_ENABLED=false && export PYTHONUNBUFFERED=1 && uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000`], {
         cwd: rootDir,
         stdio: 'pipe'
       });

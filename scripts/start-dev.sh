@@ -106,6 +106,8 @@ log "BACKEND" "Starting FastAPI server..." "$BLUE"
     export PYTHONPATH="${PYTHONPATH}:$(pwd)"
     # Disable ChromaDB telemetry to prevent warning messages
     export CHROMA_TELEMETRY_ENABLED=false
+    # Enable unbuffered output for real-time logging
+    export PYTHONUNBUFFERED=1
     uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000 2>&1 | while IFS= read -r line; do
         log "BACKEND" "$line" "$BLUE"
     done

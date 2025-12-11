@@ -12,16 +12,24 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import logging
+import sys
 from datetime import datetime
 
 
 
-# Configure logging
+# Configure logging with unbuffered output
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ],
+    force=True  # Override any existing configuration
 )
 logger = logging.getLogger(__name__)
+# Ensure all log handlers are unbuffered
+for handler in logging.root.handlers:
+    handler.flush = lambda: None  # Override flush to be a no-op (already unbuffered)
 # API version
 VERSION = "2.0.0"
 # OpenTelemetry FastAPI instrumentation

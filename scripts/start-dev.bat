@@ -97,7 +97,7 @@ if errorlevel 1 (
 
 REM Start backend in a new window and capture PID
 echo [BACKEND] Starting FastAPI server...
-start "ADK-Backend" /min cmd /c "venv\Scripts\activate && set PYTHONPATH=%cd% && uvicorn src.api.main:app --reload --host 127.0.0.1 --port 8000"
+start "ADK-Backend" /min cmd /c "venv\Scripts\activate && set PYTHONPATH=%cd% && set PYTHONUNBUFFERED=1 && uvicorn src.api.main:app --reload --host 127.0.0.1 --port 8000"
 
 REM Give backend a moment to start, then capture PID
 REM Wait a bit longer to ensure uvicorn process is actually running
