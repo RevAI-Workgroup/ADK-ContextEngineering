@@ -1713,15 +1713,15 @@ class ADKAgentWrapper:
         """
         Stream tokens using Ollama's native Python SDK with PROPER tool calling support.
         
-        This method bypasses LiteLLM entirely to avoid the known limitation where
-        LiteLLM + Ollama doesn't properly handle tool calls during streaming.
-        See: https://github.com/BerriAI/litellm/issues/15399
+        UPDATED: Uses stream=True for ALL calls, allowing real-time streaming of 
+        reasoning/content BEFORE tool execution. This solves the "frozen UI" issue
+        where reasoning appeared in bulk only after the model finished thinking.
         
         The approach:
-        1. First, make a non-streaming call with tools to detect if the model wants to use tools
-        2. If tool calls are detected, execute them and collect results
-        3. Continue the conversation with tool results (supports multi-step tool usage)
-        4. Stream the final response to the user
+        1. Use stream=True to get real-time token streaming
+        2. Stream reasoning/content tokens as they arrive (user sees thinking immediately)
+        3. Accumulate tool calls from the stream
+        4. After stream completes, execute accumulated tools and continue the loop
         
         Args:
             message: User's message
@@ -1737,21 +1737,16 @@ class ADKAgentWrapper:
             f"[Native Ollama] Processing with model '{resolved_model}': {message[:50]}..."
         )
         
-        # Track execution time for performance monitoring
         start_time = time.time()
         
-        current_reasoning = ""
-        current_response = ""
-        all_tool_calls = []  # Track all tool calls during the conversation
+        # State tracking for the entire conversation
+        all_tool_calls = []
         
         try:
-            # Initialize Ollama async client
             client = ollama.AsyncClient()
-            
-            # Build system message with our instruction
             system_message = {"role": "system", "content": INSTRUCTION}
             
-            # Process pipeline context if config provided
+            # 1. Pipeline & Context Setup
             enriched_message = message
             pipeline_metrics = {}
             enabled_techniques = []
@@ -1764,10 +1759,7 @@ class ADKAgentWrapper:
                 }
                 
                 pipeline = ContextPipeline(config)
-                pipeline_context = pipeline.process(
-                    query=message,
-                    conversation_history=[],
-                )
+                pipeline_context = pipeline.process(query=message, conversation_history=[])
                 pipeline_metrics = pipeline.get_aggregated_metrics()
                 
                 if pipeline_context.context:
@@ -1776,110 +1768,129 @@ class ADKAgentWrapper:
                         f"[Native Ollama] Enriched message with pipeline context ({len(pipeline_context.context)} chars)"
                     )
             
-            # Build tools in Ollama format
+            # 2. Build Tools & Initial Messages
             tools = self._build_ollama_tools(config)
             logger.info(f"[Native Ollama] Using {len(tools)} tools: {[t['function']['name'] for t in tools]}")
             
-            # Build initial messages
             messages = [
                 system_message,
                 {"role": "user", "content": enriched_message}
             ]
             
-            # Agentic loop: Continue until no more tool calls
-            max_iterations = 10  # Safety limit to prevent infinite loops
+            # 3. Agentic Loop
+            max_iterations = 10
             iteration = 0
             
+            # Track final response stats
+            final_reasoning_len = 0
+            final_response_len = 0
+
             while iteration < max_iterations:
                 iteration += 1
-                logger.info(f"[Native Ollama] Iteration {iteration}: Making API call...")
+                logger.info(f"[Native Ollama] Iteration {iteration}: Streaming response with tools...")
                 
-                # Yield thinking event at the start
                 if iteration == 1:
                     yield {
                         "type": "thinking",
                         "data": {"message": "Processing your request..."},
                     }
+
+                # STATE FOR THIS TURN
+                current_turn_content = ""
+                current_turn_reasoning = ""
+                current_turn_tool_calls = []
                 
-                # Make non-streaming call to detect tool usage
-                # NOTE: Ollama requires stream=False for proper tool call detection
-                response = await client.chat(
+                # Helper state for segmentation
+                in_reasoning_phase = False
+                in_explicit_think_tag = False
+                is_reasoning_model = self._is_reasoning_model(resolved_model)
+
+                # STREAMING CALL WITH TOOLS (Now enabled!)
+                # Newer Ollama versions support streaming + tool calls together
+                stream = await client.chat(
                     model=resolved_model,
                     messages=messages,
                     tools=tools,
-                    stream=False,
+                    stream=True,  # ✅ ENABLED: Allows reasoning to stream BEFORE tools execute
                 )
-                
-                # Handle response - Ollama SDK returns ChatResponse object with Message attribute
-                # The response object has a 'message' attribute that's a Message object (not dict)
-                response_message = response.message if hasattr(response, 'message') else response.get("message", {})
-                
-                # Extract fields - handle both object attributes and dict access
-                if hasattr(response_message, 'content'):
-                    content = response_message.content or ""
-                    tool_calls = response_message.tool_calls or []
-                    # CRITICAL: Ollama exposes reasoning in a separate 'thinking' field, not in <think> tags
-                    # Some models (like qwen3:8b) put reasoning in this field instead of embedding in content
-                    thinking_content = getattr(response_message, 'thinking', None) or ""
-                else:
-                    content = response_message.get("content", "")
-                    tool_calls = response_message.get("tool_calls", [])
-                    thinking_content = response_message.get("thinking", "")
-                
+
+                async for chunk in stream:
+                    # Parse the chunk
+                    # Ollama SDK objects: chunk.message.content, chunk.message.tool_calls, chunk.message.thinking
+                    
+                    # A. Handle Explicit "Thinking" field (DeepSeek/Newer Models)
+                    chunk_thinking = getattr(chunk.message, 'thinking', None)
+                    if chunk_thinking:
+                        current_turn_reasoning += chunk_thinking
+                        final_reasoning_len += len(chunk_thinking)
+                        yield {
+                            "type": "reasoning_token",
+                            "data": {
+                                "token": chunk_thinking,
+                                "cumulative_reasoning": current_turn_reasoning,
+                            },
+                        }
+                        await asyncio.sleep(0)
+
+                    # B. Handle Content (Reasoning OR Final Answer)
+                    chunk_content = chunk.message.content or ""
+                    if chunk_content:
+                        # Use existing segmentation logic to distinguish <think> vs response
+                        segments, in_reasoning_phase, in_explicit_think_tag = self._segment_stream_text(
+                            chunk_content, in_reasoning_phase, is_reasoning_model, in_explicit_think_tag
+                        )
+                        
+                        for seg_type, seg_text in segments:
+                            if not seg_text:
+                                continue
+                            if seg_type == "reasoning":
+                                current_turn_reasoning += seg_text
+                                final_reasoning_len += len(seg_text)
+                                yield {
+                                    "type": "reasoning_token",
+                                    "data": {"token": seg_text, "cumulative_reasoning": current_turn_reasoning}
+                                }
+                                await asyncio.sleep(0)
+                            else:
+                                current_turn_content += seg_text
+                                final_response_len += len(seg_text)
+                                yield {
+                                    "type": "token",
+                                    "data": {"token": seg_text, "cumulative_response": current_turn_content}
+                                }
+                                await asyncio.sleep(0)
+
+                    # C. Handle Tool Calls (Accumulate them from stream)
+                    if chunk.message.tool_calls:
+                        for tc in chunk.message.tool_calls:
+                            # Avoid duplicates - check if this tool call is already accumulated
+                            if tc not in current_turn_tool_calls:
+                                current_turn_tool_calls.append(tc)
+
+                # END OF STREAM FOR THIS TURN
                 logger.info(
-                    f"[Native Ollama] Response: content_len={len(content) if content else 0}, "
-                    f"thinking_len={len(thinking_content) if thinking_content else 0}, "
-                    f"tool_calls={len(tool_calls) if tool_calls else 0}"
+                    f"[Native Ollama] Stream complete for iteration {iteration}: "
+                    f"reasoning={len(current_turn_reasoning)} chars, "
+                    f"content={len(current_turn_content)} chars, "
+                    f"tool_calls={len(current_turn_tool_calls)}"
                 )
                 
-                # First, extract reasoning from Ollama's dedicated 'thinking' field
-                # This is how models like qwen3:8b expose their reasoning
-                if thinking_content and thinking_content.strip():
-                    reasoning_chunk = thinking_content.strip()
-                    current_reasoning += reasoning_chunk + "\n"
-                    yield {
-                        "type": "reasoning_token",
-                        "data": {
-                            "token": reasoning_chunk,
-                            "cumulative_reasoning": current_reasoning,
-                        },
+                # 4. Decide: Execute Tools OR Finish
+                if current_turn_tool_calls:
+                    logger.info(f"[Native Ollama] Processing {len(current_turn_tool_calls)} tool call(s)")
+                    
+                    # Build the assistant message to add to history
+                    # We need to reconstruct it since we streamed
+                    assistant_msg = {
+                        "role": "assistant",
+                        "content": current_turn_content if current_turn_content else None,
+                        "tool_calls": current_turn_tool_calls
                     }
-                    await asyncio.sleep(0)
-                    logger.info(f"[Native Ollama] Extracted reasoning from 'thinking' field: {len(reasoning_chunk)} chars")
-                
-                # Also check for <think> tags embedded in content (fallback for other models)
-                if content:
-                    think_pattern = re.compile(r'<think>(.*?)</think>', re.DOTALL | re.IGNORECASE)
-                    matches = think_pattern.findall(content)
-                    for match in matches:
-                        if match.strip():
-                            reasoning_chunk = match.strip()
-                            current_reasoning += reasoning_chunk + "\n"
-                            yield {
-                                "type": "reasoning_token",
-                                "data": {
-                                    "token": reasoning_chunk,
-                                    "cumulative_reasoning": current_reasoning,
-                                },
-                            }
-                            await asyncio.sleep(0)
-                            logger.info(f"[Native Ollama] Extracted reasoning from <think> tags: {len(reasoning_chunk)} chars")
-                    
-                    # Remove think tags from content for the actual response
-                    clean_content = think_pattern.sub('', content).strip()
-                else:
-                    clean_content = ""
-                
-                # Check if model wants to use tools
-                if tool_calls:
-                    logger.info(f"[Native Ollama] Processing {len(tool_calls)} tool call(s)")
-                    
-                    # Add assistant message with tool calls to history
-                    messages.append(response_message)
-                    
-                    # Process each tool call
-                    for tool_call in tool_calls:
-                        # Handle both object attributes (Ollama SDK) and dict access
+                    messages.append(assistant_msg)
+
+                    # Execute each tool
+                    for tool_call in current_turn_tool_calls:
+                        # Normalize tool call data - handle both object attributes and dict access
                         if hasattr(tool_call, 'function'):
                             func = tool_call.function
                             tool_name = getattr(func, 'name', 'unknown') if hasattr(func, 'name') else func.get("name", "unknown")
@@ -1895,42 +1906,30 @@ class ADKAgentWrapper:
                                 tool_args = json.loads(tool_args)
                             except json.JSONDecodeError as e:
                                 logger.error(f"Failed to parse tool arguments for {tool_name}: {e}")
-                                yield {
-                                    "type": "error",
-                                    "data": {
-                                        "error": f"Invalid tool arguments for {tool_name}: {str(e)}",
-                                    },
-                                }
-                                return                        
+                                tool_args = {}
+
                         logger.info(f"[Native Ollama] Executing tool: {tool_name} with args: {tool_args}")
-                        
-                        # Yield tool_call event to frontend
+
+                        # Notify Frontend of tool call
                         tool_call_data = {
                             "name": tool_name,
                             "description": f"Calling tool: {tool_name}",
                             "parameters": tool_args,
                             "timestamp": datetime.utcnow().isoformat(),
                         }
-                        all_tool_calls.append(tool_call_data)
-                        
                         yield {
                             "type": "tool_call",
                             "data": tool_call_data,
                         }
                         await asyncio.sleep(0)
-                        
+
                         # Execute the tool
                         tool_result = self._execute_tool(tool_name, tool_args)
                         
-                        # Convert result to string for the message
-                        if isinstance(tool_result, dict):
-                            tool_result_str = json.dumps(tool_result)
-                        else:
-                            tool_result_str = str(tool_result)
-                        
-                        logger.info(f"[Native Ollama] Tool result: {tool_result_str[:200]}...")
-                        
-                        # Yield tool_result event to frontend
+                        # Track for final completion event
+                        all_tool_calls.append({"name": tool_name, "parameters": tool_args, "result": tool_result})
+
+                        # Notify Frontend of result
                         yield {
                             "type": "tool_result",
                             "data": {
@@ -1941,42 +1940,21 @@ class ADKAgentWrapper:
                         }
                         await asyncio.sleep(0)
                         
-                        # Update the tool call data with result
-                        tool_call_data["result"] = tool_result
-                        
-                        # Add tool response to messages
+                        # Add tool result to message history
+                        tool_result_str = json.dumps(tool_result) if isinstance(tool_result, dict) else str(tool_result)
                         messages.append({
                             "role": "tool",
                             "content": tool_result_str,
                         })
                     
-                    # Continue loop to let model respond with tool results
+                    # Continue loop to let model process tool results...
                     continue
                 else:
-                    # No tool calls - this is the final response
-                    logger.info(f"[Native Ollama] No tool calls, streaming final response...")
-                    
-                    # If we have clean content from the non-streaming call, stream it
-                    if clean_content:
-                        # Stream the response token by token for better UX
-                        # We'll simulate token-by-token streaming from the complete response
-                        words = clean_content.split(' ')
-                        for i, word in enumerate(words):
-                            token = word + (' ' if i < len(words) - 1 else '')
-                            current_response += token
-                            yield {
-                                "type": "token",
-                                "data": {
-                                    "token": token,
-                                    "cumulative_response": current_response,
-                                },
-                            }
-                            # Small delay to simulate streaming feel
-                            await asyncio.sleep(0.02)
-                    
-                    # Exit the agentic loop
+                    # No tools called -> This was the final answer.
+                    logger.info("[Native Ollama] No tool calls, conversation complete.")
                     break
-            
+
+            # Handle max iterations
             if iteration >= max_iterations:
                 logger.warning(f"[Native Ollama] Max iterations ({max_iterations}) reached")
                 yield {
@@ -1987,44 +1965,30 @@ class ADKAgentWrapper:
                     },
                 }
                 return
-            
-            # Log completion
-            reasoning_length = len(current_reasoning.strip())
-            response_length = len(current_response.strip())
-            
-            # Calculate total execution time
+
+            # 5. Final Completion Event
             execution_time_ms = (time.time() - start_time) * 1000
             
             logger.info(
                 f"[Native Ollama] COMPLETE - Model: {resolved_model}, "
-                f"Reasoning: {reasoning_length} chars, Response: {response_length} chars, "
+                f"Reasoning: {final_reasoning_len} chars, Response: {final_response_len} chars, "
                 f"Tool calls: {len(all_tool_calls)}, Iterations: {iteration}, "
                 f"Execution time: {execution_time_ms:.0f}ms"
             )
             
-            if reasoning_length > 0:
-                logger.info(f"[Native Ollama] Reasoning preview: {current_reasoning[:200]}...")
-            
-            # Send completion
-            complete_data = {
-                "model": resolved_model,
-                "reasoning_length": reasoning_length,
-                "response_length": response_length,
-                "execution_time_ms": round(execution_time_ms),
-                "pipeline_metrics": pipeline_metrics,
-                "enabled_techniques": enabled_techniques,
-            }
-            
-            # Include tool calls if any were executed
-            if all_tool_calls:
-                complete_data["tool_calls"] = all_tool_calls
-                logger.info(f"[Native Ollama] Including {len(all_tool_calls)} tool call(s) in complete event")
-            
             yield {
                 "type": "complete",
-                "data": complete_data,
+                "data": {
+                    "model": resolved_model,
+                    "reasoning_length": final_reasoning_len,
+                    "response_length": final_response_len,
+                    "execution_time_ms": round(execution_time_ms),
+                    "pipeline_metrics": pipeline_metrics,
+                    "enabled_techniques": enabled_techniques,
+                    "tool_calls": all_tool_calls if all_tool_calls else None
+                }
             }
-            
+
         except ollama.ResponseError as e:
             logger.error(f"[Native Ollama] Ollama ResponseError: {e}", exc_info=True)
             yield {
