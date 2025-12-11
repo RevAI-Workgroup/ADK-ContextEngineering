@@ -1810,16 +1810,44 @@ class ADKAgentWrapper:
                     stream=False,
                 )
                 
-                response_message = response.get("message", {})
-                content = response_message.get("content", "")
-                tool_calls = response_message.get("tool_calls", [])
+                # Handle response - Ollama SDK returns ChatResponse object with Message attribute
+                # The response object has a 'message' attribute that's a Message object (not dict)
+                response_message = response.message if hasattr(response, 'message') else response.get("message", {})
+                
+                # Extract fields - handle both object attributes and dict access
+                if hasattr(response_message, 'content'):
+                    content = response_message.content or ""
+                    tool_calls = response_message.tool_calls or []
+                    # CRITICAL: Ollama exposes reasoning in a separate 'thinking' field, not in <think> tags
+                    # Some models (like qwen3:8b) put reasoning in this field instead of embedding in content
+                    thinking_content = getattr(response_message, 'thinking', None) or ""
+                else:
+                    content = response_message.get("content", "")
+                    tool_calls = response_message.get("tool_calls", [])
+                    thinking_content = response_message.get("thinking", "")
                 
                 logger.info(
                     f"[Native Ollama] Response: content_len={len(content) if content else 0}, "
+                    f"thinking_len={len(thinking_content) if thinking_content else 0}, "
                     f"tool_calls={len(tool_calls) if tool_calls else 0}"
                 )
                 
-                # Extract reasoning from <think> tags if present in content
+                # First, extract reasoning from Ollama's dedicated 'thinking' field
+                # This is how models like qwen3:8b expose their reasoning
+                if thinking_content and thinking_content.strip():
+                    reasoning_chunk = thinking_content.strip()
+                    current_reasoning += reasoning_chunk + "\n"
+                    yield {
+                        "type": "reasoning_token",
+                        "data": {
+                            "token": reasoning_chunk,
+                            "cumulative_reasoning": current_reasoning,
+                        },
+                    }
+                    await asyncio.sleep(0)
+                    logger.info(f"[Native Ollama] Extracted reasoning from 'thinking' field: {len(reasoning_chunk)} chars")
+                
+                # Also check for <think> tags embedded in content (fallback for other models)
                 if content:
                     think_pattern = re.compile(r'<think>(.*?)</think>', re.DOTALL | re.IGNORECASE)
                     matches = think_pattern.findall(content)
@@ -1835,6 +1863,7 @@ class ADKAgentWrapper:
                                 },
                             }
                             await asyncio.sleep(0)
+                            logger.info(f"[Native Ollama] Extracted reasoning from <think> tags: {len(reasoning_chunk)} chars")
                     
                     # Remove think tags from content for the actual response
                     clean_content = think_pattern.sub('', content).strip()
@@ -1850,9 +1879,15 @@ class ADKAgentWrapper:
                     
                     # Process each tool call
                     for tool_call in tool_calls:
-                        func = tool_call.get("function", {})
-                        tool_name = func.get("name", "unknown")
-                        tool_args = func.get("arguments", {})
+                        # Handle both object attributes (Ollama SDK) and dict access
+                        if hasattr(tool_call, 'function'):
+                            func = tool_call.function
+                            tool_name = getattr(func, 'name', 'unknown') if hasattr(func, 'name') else func.get("name", "unknown")
+                            tool_args = getattr(func, 'arguments', {}) if hasattr(func, 'arguments') else func.get("arguments", {})
+                        else:
+                            func = tool_call.get("function", {})
+                            tool_name = func.get("name", "unknown")
+                            tool_args = func.get("arguments", {})
                         
                         # Handle arguments - might be string or dict
                         if isinstance(tool_args, str):
